@@ -2,12 +2,15 @@ package graphql.execution;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import graphql.EngineRunningState;
 import graphql.ExecutionInput;
+import graphql.ExperimentalApi;
 import graphql.GraphQLContext;
 import graphql.GraphQLError;
 import graphql.Internal;
-import graphql.PublicApi;
+import graphql.Profiler;
 import graphql.collect.ImmutableKit;
+import graphql.execution.directives.QueryAppliedDirective;
 import graphql.execution.instrumentation.Instrumentation;
 import graphql.execution.instrumentation.InstrumentationState;
 import graphql.language.Document;
@@ -15,14 +18,17 @@ import graphql.language.FragmentDefinition;
 import graphql.language.OperationDefinition;
 import graphql.schema.GraphQLSchema;
 import org.dataloader.DataLoaderRegistry;
+import org.jspecify.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static graphql.Assert.assertNotNull;
 import static graphql.collect.ImmutableKit.emptyList;
 
-@PublicApi
+@Internal
 public class ExecutionContextBuilder {
 
     Instrumentation instrumentation;
@@ -38,6 +44,7 @@ public class ExecutionContextBuilder {
     Document document;
     OperationDefinition operationDefinition;
     CoercedVariables coercedVariables = CoercedVariables.emptyVariables();
+    Supplier<NormalizedVariables> normalizedVariables = NormalizedVariables::emptyVariables;
     ImmutableMap<String, FragmentDefinition> fragmentsByName = ImmutableKit.emptyMap();
     DataLoaderRegistry dataLoaderRegistry;
     Locale locale;
@@ -46,6 +53,11 @@ public class ExecutionContextBuilder {
     Object localContext;
     ExecutionInput executionInput;
     DataLoaderDispatchStrategy dataLoaderDispatcherStrategy = DataLoaderDispatchStrategy.NO_OP;
+    boolean propagateErrorsOnNonNullContractFailure = true;
+    EngineRunningState engineRunningState;
+    ResponseMapFactory responseMapFactory = ResponseMapFactory.DEFAULT;
+    Profiler profiler;
+    Supplier<Map<OperationDefinition, ImmutableList<QueryAppliedDirective>>> allOperationsDirectives = Collections::emptyMap;
 
     /**
      * @return a new builder of {@link graphql.execution.ExecutionContext}s
@@ -92,6 +104,10 @@ public class ExecutionContextBuilder {
         valueUnboxer = other.getValueUnboxer();
         executionInput = other.getExecutionInput();
         dataLoaderDispatcherStrategy = other.getDataLoaderDispatcherStrategy();
+        propagateErrorsOnNonNullContractFailure = other.propagateErrorsOnNonNullContractFailure();
+        engineRunningState = other.getEngineRunningState();
+        responseMapFactory = other.getResponseMapFactory();
+        profiler = other.getProfiler();
     }
 
     public ExecutionContextBuilder instrumentation(Instrumentation instrumentation) {
@@ -133,7 +149,7 @@ public class ExecutionContextBuilder {
      * @deprecated use {@link #graphQLContext(GraphQLContext)} instead
      */
     @Deprecated(since = "2021-07-05")
-    public ExecutionContextBuilder context(Object context) {
+    public ExecutionContextBuilder context(@Nullable Object context) {
         this.context = context;
         return this;
     }
@@ -155,6 +171,7 @@ public class ExecutionContextBuilder {
 
     /**
      * @param variables map of already coerced variables
+     *
      * @return this builder
      *
      * @deprecated use {@link #coercedVariables(CoercedVariables)} instead
@@ -167,6 +184,11 @@ public class ExecutionContextBuilder {
 
     public ExecutionContextBuilder coercedVariables(CoercedVariables coercedVariables) {
         this.coercedVariables = coercedVariables;
+        return this;
+    }
+
+    public ExecutionContextBuilder normalizedVariableValues(Supplier<NormalizedVariables> normalizedVariables) {
+        this.normalizedVariables = normalizedVariables;
         return this;
     }
 
@@ -211,14 +233,42 @@ public class ExecutionContextBuilder {
         return this;
     }
 
+    @Internal
+    public ExecutionContextBuilder responseMapFactory(ResponseMapFactory responseMapFactory) {
+        this.responseMapFactory = responseMapFactory;
+        return this;
+    }
+
     public ExecutionContextBuilder resetErrors() {
         this.errors = emptyList();
         return this;
     }
 
+    @ExperimentalApi
+    public ExecutionContextBuilder propagapropagateErrorsOnNonNullContractFailureeErrors(boolean propagateErrorsOnNonNullContractFailure) {
+        this.propagateErrorsOnNonNullContractFailure = propagateErrorsOnNonNullContractFailure;
+        return this;
+    }
+
+    public ExecutionContextBuilder engineRunningState(EngineRunningState engineRunningState) {
+        this.engineRunningState = engineRunningState;
+        return this;
+    }
+
+    public ExecutionContextBuilder profiler(Profiler profiler) {
+        this.profiler = profiler;
+        return this;
+    }
+
+    public ExecutionContextBuilder operationDirectives(Supplier<Map<OperationDefinition, ImmutableList<QueryAppliedDirective>>> allOperationsDirectives) {
+        this.allOperationsDirectives = allOperationsDirectives;
+        return this;
+    }
+
+
     public ExecutionContext build() {
         // preconditions
-        assertNotNull(executionId, () -> "You must provide a query identifier");
+        assertNotNull(executionId, "You must provide a query identifier");
         return new ExecutionContext(this);
     }
 }

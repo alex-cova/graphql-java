@@ -35,13 +35,13 @@ class SchemaDiffingTest extends Specification {
         schemaGraph.getVerticesByType(SchemaGraph.UNION).size() == 0
         schemaGraph.getVerticesByType(SchemaGraph.SCALAR).size() == 2
         schemaGraph.getVerticesByType(SchemaGraph.FIELD).size() == 40
-        schemaGraph.getVerticesByType(SchemaGraph.ARGUMENT).size() == 9
+        schemaGraph.getVerticesByType(SchemaGraph.ARGUMENT).size() == 11
         schemaGraph.getVerticesByType(SchemaGraph.INPUT_FIELD).size() == 0
         schemaGraph.getVerticesByType(SchemaGraph.INPUT_OBJECT).size() == 0
-        schemaGraph.getVerticesByType(SchemaGraph.DIRECTIVE).size() == 5
+        schemaGraph.getVerticesByType(SchemaGraph.DIRECTIVE).size() == 7
         schemaGraph.getVerticesByType(SchemaGraph.APPLIED_ARGUMENT).size() == 0
         schemaGraph.getVerticesByType(SchemaGraph.APPLIED_DIRECTIVE).size() == 0
-        schemaGraph.size() == 93
+        schemaGraph.size() == 97
 
     }
 
@@ -1446,20 +1446,20 @@ class SchemaDiffingTest extends Specification {
         def schema1 = schema('''
             input I {
                 name: String
-                field: I = {name: "default name"}
+                field: I = {name: "default name", field: null}
             }
             type Query {
                 foo(arg: I): String
-            } 
+            }
         ''')
         def schema2 = schema('''
             input I {
                 name: String
-                field: [I] = [{name: "default name"}]
+                field: [I] = [{name: "default name", field: null}]
             }
             type Query {
                 foo(arg: I): String
-            } 
+            }
         ''')
 
         when:

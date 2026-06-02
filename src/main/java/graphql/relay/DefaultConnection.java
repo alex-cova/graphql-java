@@ -2,6 +2,8 @@ package graphql.relay;
 
 import com.google.common.collect.ImmutableList;
 import graphql.PublicApi;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.List;
@@ -13,6 +15,7 @@ import static graphql.Assert.assertNotNull;
  * A default implementation of {@link graphql.relay.Connection}
  */
 @PublicApi
+@NullMarked
 public class DefaultConnection<T> implements Connection<T> {
 
     private final ImmutableList<Edge<T>> edges;
@@ -27,8 +30,8 @@ public class DefaultConnection<T> implements Connection<T> {
      * @throws IllegalArgumentException if edges or page info is null. use {@link Collections#emptyList()} for empty edges.
      */
     public DefaultConnection(List<Edge<T>> edges, PageInfo pageInfo) {
-        this.edges = ImmutableList.copyOf(assertNotNull(edges, () -> "edges cannot be null"));
-        this.pageInfo = assertNotNull(pageInfo, () -> "page info cannot be null");
+        this.edges = ImmutableList.copyOf(assertNotNull(edges, "edges cannot be null"));
+        this.pageInfo = assertNotNull(pageInfo, "page info cannot be null");
     }
 
     @Override
@@ -42,7 +45,7 @@ public class DefaultConnection<T> implements Connection<T> {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(@Nullable Object o) {
         if (this == o) {
             return true;
         }

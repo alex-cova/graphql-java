@@ -2,7 +2,7 @@ package graphql.execution.reactive.tck;
 
 import graphql.execution.reactive.CompletionStageMappingPublisher;
 import io.reactivex.Flowable;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.tck.PublisherVerification;
 import org.reactivestreams.tck.TestEnvironment;
@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 /**
@@ -47,8 +49,9 @@ public class CompletionStageMappingPublisherRandomCompleteTckVerificationTest ex
         return true;
     }
 
-    @NotNull
+    @NonNull
     private static Function<Integer, CompletionStage<String>> mapperFunc() {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
         return i -> CompletableFuture.supplyAsync(() -> {
             int ms = rand(0, 5);
             try {
@@ -57,7 +60,7 @@ public class CompletionStageMappingPublisherRandomCompleteTckVerificationTest ex
                 throw new RuntimeException(e);
             }
             return i + "!";
-        });
+        }, executor);
     }
 
     static Random rn = new Random();

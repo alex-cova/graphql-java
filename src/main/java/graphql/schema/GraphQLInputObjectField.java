@@ -8,13 +8,14 @@ import graphql.language.InputValueDefinition;
 import graphql.language.Value;
 import graphql.util.TraversalControl;
 import graphql.util.TraverserContext;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
+import org.jspecify.annotations.NullUnmarked;
 
 import static graphql.Assert.assertNotNull;
 import static graphql.Assert.assertValidName;
@@ -55,8 +56,8 @@ public class GraphQLInputObjectField implements GraphQLNamedSchemaElement, Graph
             InputValueDefinition definition,
             String deprecationReason) {
         assertValidName(name);
-        assertNotNull(type, () -> "type can't be null");
-        assertNotNull(directives, () -> "directives cannot be null");
+        assertNotNull(type, "type can't be null");
+        assertNotNull(directives, "directives cannot be null");
 
         this.name = name;
         this.originalType = type;
@@ -87,7 +88,7 @@ public class GraphQLInputObjectField implements GraphQLNamedSchemaElement, Graph
      *
      * @return a input value with captured state
      */
-    public @NotNull InputValueWithState getInputFieldDefaultValue() {
+    public @NonNull InputValueWithState getInputFieldDefaultValue() {
         return defaultValue;
     }
 
@@ -266,6 +267,7 @@ public class GraphQLInputObjectField implements GraphQLNamedSchemaElement, Graph
     }
 
     @PublicApi
+    @NullUnmarked
     public static class Builder extends GraphqlDirectivesContainerTypeBuilder<Builder,Builder> {
         private InputValueWithState defaultValue = InputValueWithState.NOT_SET;
         private GraphQLInputType type;
@@ -373,7 +375,7 @@ public class GraphQLInputObjectField implements GraphQLNamedSchemaElement, Graph
         }
 
         public GraphQLInputObjectField build() {
-            assertNotNull(type, () -> "type can't be null");
+            assertNotNull(type, "type can't be null");
             return new GraphQLInputObjectField(
                     name,
                     description,

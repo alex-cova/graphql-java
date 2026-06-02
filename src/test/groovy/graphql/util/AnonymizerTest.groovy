@@ -2,7 +2,7 @@ package graphql.util
 
 import graphql.AssertException
 import graphql.TestUtil
-import graphql.schema.idl.DirectiveInfo
+import graphql.Directives
 import graphql.schema.idl.SchemaPrinter
 import spock.lang.Specification
 
@@ -77,6 +77,27 @@ type Object2 {
 """
         newQuery == "{...Fragment1 field1{...on Object2{field2 field3}}} fragment Fragment1 on Object1 {field1{field2 field3}}"
 
+    }
+
+    def "query with inline fragment without type condition"() {
+        given:
+        def schema = TestUtil.schema("""
+        type Query {
+            foo: Foo
+        }
+        type Foo {
+            bar1: String
+            bar2: ID
+        }
+        """)
+        def query = "{foo {... {bar1 bar2}}}"
+
+        when:
+        def result = Anonymizer.anonymizeSchemaAndQueries(schema, [query])
+        def newQuery = result.queries[0]
+
+        then:
+        newQuery == "{field1{...{field2 field3}}}"
     }
 
     def "query with arguments"() {
@@ -718,46 +739,49 @@ type Object1 {
         when:
         def result = Anonymizer.anonymizeSchema(schema)
         def newSchema = new SchemaPrinter(SchemaPrinter.Options.defaultOptions()
-                .includeDirectives({!DirectiveInfo.isGraphqlSpecifiedDirective(it) || it == "deprecated"}))
+                .includeDirectives({!Directives.isBuiltInDirective(it) || it == "deprecated"}))
                 .print(result)
 
         then:
-        newSchema == """\
-            schema @Directive1(argument1 : "stringValue1"){
-              query: Object1
-            }
-            
-            directive @Directive1(argument1: String! = "stringValue4") repeatable on SCHEMA | SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-            
-            directive @deprecated(reason: String) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+        newSchema == """schema @Directive1(argument1 : "stringValue1"){
+  query: Object1
+}
 
-            interface Interface1 @Directive1(argument1 : "stringValue12") {
-              field2: String
-              field3: Enum1
-            }
-            
-            union Union1 @Directive1(argument1 : "stringValue21") = Object2
-            
-            type Object1 @Directive1(argument1 : "stringValue8") {
-              field1: Interface1 @Directive1(argument1 : "stringValue9")
-              field4: Union1 @deprecated
-            }
-            
-            type Object2 implements Interface1 {
-              field2: String
-              field3: Enum1
-              field5(argument2: InputObject1): String
-            }
-            
-            enum Enum1 @Directive1(argument1 : "stringValue15") {
-              EnumValue1 @Directive1(argument1 : "stringValue18")
-              EnumValue2
-            }
-            
-            input InputObject1 @Directive1(argument1 : "stringValue24") {
-              inputField1: Int @Directive1(argument1 : "stringValue27")
-            }
-        """.stripIndent()
+directive @Directive1(argument1: String! = "stringValue4") repeatable on SCHEMA | SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+"Marks the field, argument, input field or enum value as deprecated"
+directive @deprecated(
+    "The reason for the deprecation"
+    reason: String! = "No longer supported"
+  ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+interface Interface1 @Directive1(argument1 : "stringValue12") {
+  field2: String
+  field3: Enum1
+}
+
+union Union1 @Directive1(argument1 : "stringValue21") = Object2
+
+type Object1 @Directive1(argument1 : "stringValue8") {
+  field1: Interface1 @Directive1(argument1 : "stringValue9")
+  field4: Union1 @deprecated
+}
+
+type Object2 implements Interface1 {
+  field2: String
+  field3: Enum1
+  field5(argument2: InputObject1): String
+}
+
+enum Enum1 @Directive1(argument1 : "stringValue15") {
+  EnumValue1 @Directive1(argument1 : "stringValue18")
+  EnumValue2
+}
+
+input InputObject1 @Directive1(argument1 : "stringValue24") {
+  inputField1: Int @Directive1(argument1 : "stringValue27")
+}
+"""
     }
 
     def "query with directives"() {

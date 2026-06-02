@@ -4,7 +4,8 @@ import graphql.execution.DataFetcherResult;
 import graphql.execution.ResultPath;
 import graphql.language.SourceLocation;
 import graphql.schema.DataFetchingEnvironment;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,7 @@ import static graphql.Assert.assertNotNull;
  */
 @SuppressWarnings("unchecked")
 @PublicApi
+@NullUnmarked
 public class GraphqlErrorBuilder<B extends GraphqlErrorBuilder<B>> implements GraphQLError.Builder<B> {
 
     private String message;
@@ -129,7 +131,7 @@ public class GraphqlErrorBuilder<B extends GraphqlErrorBuilder<B>> implements Gr
      * @return a newly built GraphqlError
      */
     public GraphQLError build() {
-        assertNotNull(message, () -> "You must provide error message");
+        assertNotNull(message, "You must provide error message");
         return new GraphqlErrorImpl(message, locations, errorType, path, extensions);
     }
 

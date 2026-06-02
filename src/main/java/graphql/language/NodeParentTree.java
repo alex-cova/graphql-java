@@ -3,11 +3,15 @@ package graphql.language;
 import com.google.common.collect.ImmutableList;
 import graphql.Internal;
 import graphql.PublicApi;
+import graphql.collect.ImmutableKit;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import static graphql.Assert.assertNotNull;
@@ -20,32 +24,32 @@ import static graphql.Assert.assertTrue;
  * on an ObjectTypeDefinition.
  */
 @PublicApi
+@NullMarked
 public class NodeParentTree<T extends Node> {
 
     private final T node;
-    private final NodeParentTree<T> parent;
+    private final @Nullable NodeParentTree<T> parent;
     private final ImmutableList<String> path;
 
     @Internal
     public NodeParentTree(Deque<T> nodeStack) {
-        assertNotNull(nodeStack, () -> "You MUST have a non null stack of nodes");
-        assertTrue(!nodeStack.isEmpty(), () -> "You MUST have a non empty stack of nodes");
+        assertNotNull(nodeStack, "You MUST have a non null stack of nodes");
+        assertTrue(!nodeStack.isEmpty(), "You MUST have a non empty stack of nodes");
 
         Deque<T> copy = new ArrayDeque<>(nodeStack);
         path = mkPath(copy);
         node = copy.pop();
         if (!copy.isEmpty()) {
-            parent = new NodeParentTree<T>(copy);
+            parent = new NodeParentTree<>(copy);
         } else {
             parent = null;
         }
     }
 
     private ImmutableList<String> mkPath(Deque<T> copy) {
-        return copy.stream()
-                .filter(node1 -> node1 instanceof NamedNode)
-                .map(node1 -> ((NamedNode) node1).getName())
-                .collect(ImmutableList.toImmutableList());
+        return ImmutableKit.filterAndMap(copy,
+                node1 -> node1 instanceof NamedNode,
+                node1 -> Objects.toString(((NamedNode) node1).getName(), ""));
     }
 
 
@@ -88,8 +92,6 @@ public class NodeParentTree<T extends Node> {
 
     @Override
     public String toString() {
-        return String.valueOf(node) +
-                " - parent : " +
-                parent;
+        return node + " - parent : " + parent;
     }
 }

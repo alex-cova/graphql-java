@@ -175,7 +175,7 @@ public class ParserOptions {
      *
      * This static can be set to true to allow the behavior of version 16.x or before.
      *
-     * @param options - the new default JVM parser options for operation parsing
+     * @param options - the new default JVM parser options for SDL parsing
      *
      * @see graphql.language.IgnoredChar
      * @see graphql.language.SourceLocation
@@ -302,6 +302,8 @@ public class ParserOptions {
     /**
      * Option to redact offending tokens in parser error messages.
      * By default, the parser will include the offending token in the error message, if possible.
+     *
+     * @return true if the token parser messages should be redacted
      */
     public boolean isRedactTokenParserErrorMessages() {
         return redactTokenParserErrorMessages;

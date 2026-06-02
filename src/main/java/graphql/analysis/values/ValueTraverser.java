@@ -2,6 +2,7 @@ package graphql.analysis.values;
 
 import com.google.common.collect.ImmutableList;
 import graphql.PublicApi;
+import graphql.collect.ImmutableKit;
 import graphql.schema.DataFetchingEnvironment;
 import graphql.schema.DataFetchingEnvironmentImpl;
 import graphql.schema.GraphQLAppliedDirective;
@@ -18,12 +19,14 @@ import graphql.schema.GraphQLList;
 import graphql.schema.GraphQLNonNull;
 import graphql.schema.GraphQLScalarType;
 import graphql.schema.GraphQLTypeUtil;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
+import static graphql.Assert.assertNotNull;
 import static graphql.Assert.assertShouldNeverHappen;
 import static graphql.Assert.assertTrue;
 import static graphql.analysis.values.ValueVisitor.ABSENCE_SENTINEL;
@@ -46,13 +49,14 @@ import static graphql.analysis.values.ValueVisitor.ABSENCE_SENTINEL;
  * null values for non-nullable types say, so you need to be careful.
  */
 @PublicApi
+@NullMarked
 public class ValueTraverser {
 
     private static class InputElements implements ValueVisitor.InputElements {
 
         private final ImmutableList<GraphQLInputSchemaElement> inputElements;
         private final List<GraphQLInputSchemaElement> unwrappedInputElements;
-        private final GraphQLInputValueDefinition lastElement;
+        private final @Nullable GraphQLInputValueDefinition lastElement;
 
         private InputElements(GraphQLInputSchemaElement startElement) {
             this.inputElements = ImmutableList.of(startElement);
@@ -62,13 +66,12 @@ public class ValueTraverser {
 
         private InputElements(ImmutableList<GraphQLInputSchemaElement> inputElements) {
             this.inputElements = inputElements;
-            this.unwrappedInputElements = inputElements.stream()
-                    .filter(it -> !(it instanceof GraphQLNonNull || it instanceof GraphQLList))
-                    .collect(ImmutableList.toImmutableList());
+            this.unwrappedInputElements = ImmutableKit.filter(inputElements,
+                    it -> !(it instanceof GraphQLNonNull || it instanceof GraphQLList));
 
-            List<GraphQLInputValueDefinition> inputValDefs = unwrappedInputElements.stream()
-                    .filter(it -> it instanceof GraphQLInputValueDefinition)
-                    .map(GraphQLInputValueDefinition.class::cast).collect(Collectors.toList());
+            List<GraphQLInputValueDefinition> inputValDefs = ImmutableKit.filterAndMap(unwrappedInputElements,
+                    it -> it instanceof GraphQLInputValueDefinition,
+                    GraphQLInputValueDefinition.class::cast);
             this.lastElement = inputValDefs.isEmpty() ? null : inputValDefs.get(inputValDefs.size() - 1);
         }
 
@@ -89,7 +92,7 @@ public class ValueTraverser {
         }
 
         @Override
-        public GraphQLInputValueDefinition getLastInputValueDefinition() {
+        public @Nullable GraphQLInputValueDefinition getLastInputValueDefinition() {
             return lastElement;
         }
     }
@@ -162,7 +165,7 @@ public class ValueTraverser {
      *
      * @return the same value if nothing changes or a new value if the visitor changes anything
      */
-    public static Object visitPreOrder(Object coercedArgumentValue, GraphQLArgument argument, ValueVisitor visitor) {
+    public static @Nullable Object visitPreOrder(@Nullable Object coercedArgumentValue, GraphQLArgument argument, ValueVisitor visitor) {
         InputElements inputElements = new InputElements(argument);
         Object newValue = visitor.visitArgumentValue(coercedArgumentValue, argument, inputElements);
         if (newValue == ABSENCE_SENTINEL) {
@@ -186,7 +189,7 @@ public class ValueTraverser {
      *
      * @return the same value if nothing changes or a new value if the visitor changes anything
      */
-    public static Object visitPreOrder(Object coercedArgumentValue, GraphQLAppliedDirectiveArgument argument, ValueVisitor visitor) {
+    public static @Nullable Object visitPreOrder(@Nullable Object coercedArgumentValue, GraphQLAppliedDirectiveArgument argument, ValueVisitor visitor) {
         InputElements inputElements = new InputElements(argument);
         Object newValue = visitor.visitAppliedDirectiveArgumentValue(coercedArgumentValue, argument, inputElements);
         if (newValue == ABSENCE_SENTINEL) {
@@ -199,7 +202,7 @@ public class ValueTraverser {
         return newValue;
     }
 
-    private static Object visitPreOrderImpl(Object coercedValue, GraphQLInputType startingInputType, InputElements containingElements, ValueVisitor visitor) {
+    private static @Nullable Object visitPreOrderImpl(@Nullable Object coercedValue, GraphQLInputType startingInputType, InputElements containingElements, ValueVisitor visitor) {
         if (startingInputType instanceof GraphQLNonNull) {
             containingElements = containingElements.push(startingInputType);
         }
@@ -219,9 +222,9 @@ public class ValueTraverser {
         }
     }
 
-    private static Object visitObjectValue(Object coercedValue, GraphQLInputObjectType inputObjectType, InputElements containingElements, ValueVisitor visitor) {
+    private static @Nullable Object visitObjectValue(@Nullable Object coercedValue, GraphQLInputObjectType inputObjectType, InputElements containingElements, ValueVisitor visitor) {
         if (coercedValue != null) {
-            assertTrue(coercedValue instanceof Map, () -> "A input object type MUST have an Map<String,Object> value");
+            assertTrue(coercedValue instanceof Map, "A input object type MUST have an Map<String,Object> value");
         }
         @SuppressWarnings("unchecked")
         Map<String, Object> map = (Map<String, Object>) coercedValue;
@@ -264,9 +267,9 @@ public class ValueTraverser {
         }
     }
 
-    private static Object visitListValue(Object coercedValue, GraphQLList listInputType, InputElements containingElements, ValueVisitor visitor) {
+    private static @Nullable Object visitListValue(@Nullable Object coercedValue, GraphQLList listInputType, InputElements containingElements, ValueVisitor visitor) {
         if (coercedValue != null) {
-            assertTrue(coercedValue instanceof List, () -> "A list type MUST have an List value");
+            assertTrue(coercedValue instanceof List, "A list type MUST have an List value");
         }
         @SuppressWarnings("unchecked")
         List<Object> list = (List<Object>) coercedValue;
@@ -282,7 +285,7 @@ public class ValueTraverser {
                 Object newValue = visitPreOrderImpl(subValue, inputType, containingElements, visitor);
                 if (copiedList != null) {
                     if (newValue != ABSENCE_SENTINEL) {
-                        copiedList.add(newValue);
+                        copiedList.add(assertNotNull(newValue, "list element must not be null"));
                     }
                 } else if (hasChanged(newValue, subValue)) {
                     // go into copy mode because something has changed
@@ -292,7 +295,7 @@ public class ValueTraverser {
                         copiedList.add(newList.get(j));
                     }
                     if (newValue != ABSENCE_SENTINEL) {
-                        copiedList.add(newValue);
+                        copiedList.add(assertNotNull(newValue, "list element must not be null"));
                     }
                 }
                 i++;
@@ -307,11 +310,11 @@ public class ValueTraverser {
         }
     }
 
-    private static boolean hasChanged(Object newValue, Object oldValue) {
+    private static boolean hasChanged(@Nullable Object newValue, @Nullable Object oldValue) {
         return newValue != oldValue || newValue == ABSENCE_SENTINEL;
     }
 
-    private static void setNewValue(Map<String, Object> newMap, String key, Object newValue) {
+    private static void setNewValue(Map<String, Object> newMap, String key, @Nullable Object newValue) {
         if (newValue == ABSENCE_SENTINEL) {
             newMap.remove(key);
         } else {

@@ -19,8 +19,8 @@ import graphql.schema.GraphQLSchema;
 import graphql.schema.GraphQLUnionType;
 import graphql.util.FpKit;
 import graphql.util.MutableRef;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -136,7 +136,7 @@ public class ExecutableNormalizedField {
      *
      * @return true if the field is conditional
      */
-    public boolean isConditional(@NotNull GraphQLSchema schema) {
+    public boolean isConditional(@NonNull GraphQLSchema schema) {
         if (parent == null) {
             return false;
         }
@@ -183,7 +183,7 @@ public class ExecutableNormalizedField {
     public GraphQLOutputType getType(GraphQLSchema schema) {
         List<GraphQLFieldDefinition> fieldDefinitions = getFieldDefinitions(schema);
         Set<String> fieldTypes = fieldDefinitions.stream().map(fd -> simplePrint(fd.getType())).collect(toSet());
-        assertTrue(fieldTypes.size() == 1, () -> "More than one type ... use getTypes");
+        assertTrue(fieldTypes.size() == 1, "More than one type ... use getTypes");
         return fieldDefinitions.get(0).getType();
     }
 
@@ -198,9 +198,13 @@ public class ExecutableNormalizedField {
             return;
         }
 
+        var fieldVisibility = schema.getCodeRegistry().getFieldVisibility();
         for (String objectTypeName : objectTypeNames) {
             GraphQLObjectType type = (GraphQLObjectType) assertNotNull(schema.getType(objectTypeName));
-            consumer.accept(assertNotNull(type.getField(fieldName), "No field %s found for type %s", fieldName, objectTypeName));
+            // Use field visibility to allow custom visibility implementations to provide placeholder fields
+            // for fields that don't exist on the local schema (e.g., in federated subgraphs)
+            GraphQLFieldDefinition field = fieldVisibility.getFieldDefinition(type, fieldName);
+            consumer.accept(assertNotNull(field, "No field %s found for type %s", fieldName, objectTypeName));
         }
     }
 
@@ -223,7 +227,8 @@ public class ExecutableNormalizedField {
 
         String objectTypeName = objectTypeNames.iterator().next();
         GraphQLObjectType type = (GraphQLObjectType) assertNotNull(schema.getType(objectTypeName));
-        return assertNotNull(type.getField(fieldName), "No field %s found for type %s", fieldName, objectTypeName);
+        var fieldVisibility = schema.getCodeRegistry().getFieldVisibility();
+        return assertNotNull(fieldVisibility.getFieldDefinition(type, fieldName), "No field %s found for type %s", fieldName, objectTypeName);
     }
 
     private static GraphQLFieldDefinition resolveIntrospectionField(GraphQLSchema schema, Set<String> objectTypeNames, String fieldName) {
@@ -436,8 +441,8 @@ public class ExecutableNormalizedField {
     }
 
     public List<ExecutableNormalizedField> getChildren(int includingRelativeLevel) {
+        assertTrue(includingRelativeLevel >= 1, "relative level must be >= 1");
         List<ExecutableNormalizedField> result = new ArrayList<>();
-        assertTrue(includingRelativeLevel >= 1, () -> "relative level must be >= 1");
 
         this.getChildren().forEach(child -> {
             traverseImpl(child, result::add, 1, includingRelativeLevel);
@@ -655,7 +660,7 @@ public class ExecutableNormalizedField {
             return this;
         }
 
-        public Builder astArguments(@NotNull List<Argument> astArguments) {
+        public Builder astArguments(@NonNull List<Argument> astArguments) {
             this.astArguments = ImmutableList.copyOf(astArguments);
             return this;
         }

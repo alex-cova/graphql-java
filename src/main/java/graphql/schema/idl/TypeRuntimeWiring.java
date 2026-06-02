@@ -16,21 +16,20 @@ import static java.lang.String.format;
 
 /**
  * A type runtime wiring is a specification of the data fetchers and possible type resolver for a given type name.
- *
+ * <br>
  * This is used by {@link RuntimeWiring} to wire together a functional {@link GraphQLSchema}
  */
 @PublicApi
 public class TypeRuntimeWiring {
 
-    private final static AtomicBoolean DEFAULT_STRICT_MODE = new AtomicBoolean(false);
+    private final static AtomicBoolean DEFAULT_STRICT_MODE = new AtomicBoolean(true);
 
     /**
-     * By default {@link TypeRuntimeWiring} builders are not in strict mode, but you can set a JVM wide value
-     * so that any created will be.
+     * By default {@link TypeRuntimeWiring} builders are in strict mode, but you can set a JVM wide value too
      *
      * @param strictMode the desired strict mode state
      *
-     * @see Builder#strictMode()
+     * @see Builder#strictMode(boolean)
      */
     public static void setStrictModeJvmWide(boolean strictMode) {
         DEFAULT_STRICT_MODE.set(strictMode);
@@ -65,7 +64,7 @@ public class TypeRuntimeWiring {
      * @return the builder
      */
     public static Builder newTypeWiring(String typeName) {
-        assertNotNull(typeName, () -> "You must provide a type name");
+        assertNotNull(typeName, "You must provide a type name");
         return new Builder().typeName(typeName);
     }
 
@@ -127,6 +126,20 @@ public class TypeRuntimeWiring {
          *
          * @return this builder
          */
+        public Builder strictMode(boolean strictMode) {
+            this.strictMode = strictMode;
+            return this;
+        }
+
+        /**
+         * This puts the builder into strict mode, so if things get defined twice, for example, it
+         * will throw a {@link StrictModeWiringException}.
+         *
+         * @return this builder
+         *
+         * @deprecated use {@link #strictMode(boolean)} instead
+         */
+        @Deprecated(since = "2025-03-22", forRemoval = true)
         public Builder strictMode() {
             this.strictMode = true;
             return this;
@@ -141,8 +154,8 @@ public class TypeRuntimeWiring {
          * @return the current type wiring
          */
         public Builder dataFetcher(String fieldName, DataFetcher dataFetcher) {
-            assertNotNull(dataFetcher, () -> "you must provide a data fetcher");
-            assertNotNull(fieldName, () -> "you must tell us what field");
+            assertNotNull(dataFetcher, "you must provide a data fetcher");
+            assertNotNull(fieldName, "you must tell us what field");
             if (strictMode) {
                 assertFieldStrictly(fieldName);
             }
@@ -158,7 +171,7 @@ public class TypeRuntimeWiring {
          * @return the current type wiring
          */
         public Builder dataFetchers(Map<String, DataFetcher> dataFetchersMap) {
-            assertNotNull(dataFetchersMap, () -> "you must provide a data fetchers map");
+            assertNotNull(dataFetchersMap, "you must provide a data fetchers map");
             if (strictMode) {
                 dataFetchersMap.forEach((fieldName, df) -> {
                     assertFieldStrictly(fieldName);
@@ -200,13 +213,13 @@ public class TypeRuntimeWiring {
          * @return the current type wiring
          */
         public Builder typeResolver(TypeResolver typeResolver) {
-            assertNotNull(typeResolver, () -> "you must provide a type resolver");
+            assertNotNull(typeResolver, "you must provide a type resolver");
             this.typeResolver = typeResolver;
             return this;
         }
 
         public Builder enumValues(EnumValuesProvider enumValuesProvider) {
-            assertNotNull(enumValuesProvider, () -> "you must provide an enum values provider");
+            assertNotNull(enumValuesProvider, "you must provide an enum values provider");
             this.enumValuesProvider = enumValuesProvider;
             return this;
         }
@@ -215,7 +228,7 @@ public class TypeRuntimeWiring {
          * @return the built type wiring
          */
         public TypeRuntimeWiring build() {
-            assertNotNull(typeName, () -> "you must provide a type name");
+            assertNotNull(typeName, "you must provide a type name");
             return new TypeRuntimeWiring(typeName, defaultDataFetcher, fieldDataFetchers, typeResolver, enumValuesProvider);
         }
     }

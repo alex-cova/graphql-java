@@ -14,6 +14,7 @@ import graphql.language.IntValue
 import graphql.language.ScalarTypeDefinition
 import graphql.language.SchemaDefinition
 import graphql.language.StringValue
+import graphql.language.TypeName
 import graphql.schema.Coercing
 import graphql.schema.GraphQLAppliedDirective
 import graphql.schema.GraphQLCodeRegistry
@@ -965,15 +966,26 @@ type Query {
         // args and directives are sorted like the rest of the schema printer
         result == '''directive @argDirective on ARGUMENT_DEFINITION
 
+"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
 "Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
 
 directive @enumTypeDirective on ENUM
 
 directive @enumValueDirective on ENUM_VALUE
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 directive @fieldDirective1 on FIELD_DEFINITION
 
@@ -1141,11 +1153,22 @@ input SomeInput {
 
         then:
         // args and directives are sorted like the rest of the schema printer
-        result == '''"Marks the field, argument, input field or enum value as deprecated"
+        result == '''"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+"Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -1237,13 +1260,24 @@ type Query {
         def resultWithDirectives = new SchemaPrinter(defaultOptions().includeDirectives(true)).print(schema)
 
         then:
-        resultWithDirectives == '''"Marks the field, argument, input field or enum value as deprecated"
+        resultWithDirectives == '''"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+"Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
 
 directive @example on FIELD_DEFINITION
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -1305,13 +1339,24 @@ type Query {
         def resultWithDirectiveDefinitions = new SchemaPrinter(defaultOptions().includeDirectiveDefinitions(true)).print(schema)
 
         then:
-        resultWithDirectiveDefinitions == '''"Marks the field, argument, input field or enum value as deprecated"
+        resultWithDirectiveDefinitions == '''"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+"Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
 
 directive @example on FIELD_DEFINITION
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -1402,11 +1447,22 @@ extend schema {
   subscription: MySubscription
 }
 
+"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
 "Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -1488,11 +1544,22 @@ schema @schemaDirective{
   mutation: MyMutation
 }
 
+"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
 "Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -1628,13 +1695,24 @@ type MyQuery {
         def result = new SchemaPrinter(printOptions).print(schema)
 
         then:
-        result == '''"Marks the field, argument, input field or enum value as deprecated"
+        result == '''"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+"Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
 
 directive @directive1 on SCALAR
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -1873,7 +1951,7 @@ type Query {
         result == '''"Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
 
 type Query {
@@ -2164,11 +2242,22 @@ type PrintMeType {
   query: MyQuery
 }
 
+"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
 "Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 directive @foo on SCHEMA
 
@@ -2396,11 +2485,22 @@ directive @include(
     if: Boolean!
   ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
+
 "Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+"This directive allows results to be deferred during execution"
+directive @defer(
+    "A unique label that represents the fragment being deferred"
+    label: String,
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
 union ZUnion = XQuery | Query
 
@@ -2512,15 +2612,26 @@ schema {
   mutation: Mutation
 }
 
+"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
 "Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
 
 " custom directive 'example' description 1"
 # custom directive 'example' comment 1
 directive @example on ENUM_VALUE
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -2633,7 +2744,7 @@ input Gun {
                 .description(" custom directive 'example' description 1")
                 .definition(DirectiveDefinition.newDirectiveDefinition().comments(makeComments(" custom directive 'example' comment 1")).build()).build()
         def asteroidType = newScalar().name("Asteroid").description("desc")
-                .definition(ScalarTypeDefinition.newScalarTypeDefinition().comments(makeComments(" scalar Asteroid comment 1")).build())
+                .definition(ScalarTypeDefinition.newScalarTypeDefinition().name("Asteroid").comments(makeComments(" scalar Asteroid comment 1")).build())
                 .coercing(TestUtil.mockCoercing())
                 .build()
         def nodeType = newInterface().name("Node")
@@ -2644,11 +2755,11 @@ input Gun {
                 .field(newFieldDefinition().name("name").type(GraphQLString).build())
                 .build()
         def episodeType = newEnum().name("Episode")
-                .definition(newEnumTypeDefinition().comments(
+                .definition(newEnumTypeDefinition().name("Episode").comments(
                         makeComments(" enum Episode comment 1", " enum Episode comment 2")).build())
                 .values(List.of(
                         GraphQLEnumValueDefinition.newEnumValueDefinition().name("EMPIRE")
-                                .definition(EnumValueDefinition.newEnumValueDefinition().comments(makeComments(" enum value EMPIRE comment 1")).build()).build(),
+                                .definition(EnumValueDefinition.newEnumValueDefinition().name("EMPIRE").comments(makeComments(" enum value EMPIRE comment 1")).build()).build(),
                         GraphQLEnumValueDefinition.newEnumValueDefinition().name("JEDI").build(),
                         GraphQLEnumValueDefinition.newEnumValueDefinition().name("NEWHOPE").withDirective(exampleDirective).build()))
                 .build()
@@ -2682,11 +2793,11 @@ input Gun {
         def queryType = newObject().name("Query")
                 .definition(newObjectTypeDefinition().comments(makeComments(" type query comment 1", " type query comment 2")).build())
                 .field(newFieldDefinition().name("hero").type(characterType)
-                        .definition(FieldDefinition.newFieldDefinition().comments(makeComments(" query field 'hero' comment")).build())
+                        .definition(FieldDefinition.newFieldDefinition().name("hero").type(new TypeName("Character")).comments(makeComments(" query field 'hero' comment")).build())
                         .argument(newArgument().name("episode").type(episodeType).build())
                         .build())
                 .field(newFieldDefinition().name("humanoid").type(humanoidType)
-                        .definition(FieldDefinition.newFieldDefinition().comments(makeComments(" query field 'humanoid' comment")).build())
+                        .definition(FieldDefinition.newFieldDefinition().name("humanoid").type(new TypeName("Humanoid")).comments(makeComments(" query field 'humanoid' comment")).build())
                         .argument(newArgument().name("id").type(nonNull(GraphQLID)).build())
                         .build())
                 .build()
@@ -2749,14 +2860,25 @@ schema {
   mutation: Mutation
 }
 
+"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
 "Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
 
 " custom directive 'example' description 1"
 directive @example on ENUM_VALUE
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(
@@ -2937,11 +3059,22 @@ input Input {
 
         expect: "has no skip definition"
 
-        result == """"Marks the field, argument, input field or enum value as deprecated"
+        result == """"This directive allows results to be deferred during execution"
+directive @defer(
+    "Deferred behaviour is controlled by this argument"
+    if: Boolean! = true,
+    "A unique label that represents the fragment being deferred"
+    label: String
+  ) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+"Marks the field, argument, input field or enum value as deprecated"
 directive @deprecated(
     "The reason for the deprecation"
-    reason: String = "No longer supported"
+    reason: String! = "No longer supported"
   ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | ENUM_VALUE | INPUT_FIELD_DEFINITION
+
+"This directive disables error propagation when a non nullable field returns null for the given operation."
+directive @experimental_disableErrorPropagation on QUERY | MUTATION | SUBSCRIPTION
 
 "Directs the executor to include this field or fragment only when the `if` argument is true"
 directive @include(

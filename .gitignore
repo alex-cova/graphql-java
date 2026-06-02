@@ -1,3 +1,4 @@
+.claude/worktrees/
 *.iml
 *.ipr
 *.iws
@@ -16,3 +17,5 @@ docs/_build/
 /.nb-gradle/
 gen
 .DS_Store
+.vscode
+.claude/scheduled_tasks.lock

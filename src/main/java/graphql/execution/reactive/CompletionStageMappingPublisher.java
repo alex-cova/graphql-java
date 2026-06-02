@@ -1,7 +1,7 @@
 package graphql.execution.reactive;
 
 import graphql.Internal;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 
@@ -35,11 +35,11 @@ public class CompletionStageMappingPublisher<D, U> implements Publisher<D> {
 
     @Override
     public void subscribe(Subscriber<? super D> downstreamSubscriber) {
-        assertNotNullWithNPE(downstreamSubscriber, () -> "Subscriber passed to subscribe must not be null");
+        assertNotNullWithNPE(downstreamSubscriber, "Subscriber passed to subscribe must not be null");
         upstreamPublisher.subscribe(createSubscriber(downstreamSubscriber));
     }
 
-    @NotNull
+    @NonNull
     protected Subscriber<? super U> createSubscriber(Subscriber<? super D> downstreamSubscriber) {
         return new CompletionStageSubscriber<>(mapper, downstreamSubscriber);
     }

@@ -1,41 +1,54 @@
 package graphql.execution;
 
 
+import com.google.common.collect.ImmutableList;
+import graphql.Directives;
+import graphql.EngineRunningState;
 import graphql.ExecutionInput;
 import graphql.ExecutionResult;
 import graphql.ExecutionResultImpl;
-import graphql.ExperimentalApi;
+import graphql.GraphQL;
 import graphql.GraphQLContext;
 import graphql.GraphQLError;
+import graphql.GraphQLException;
 import graphql.Internal;
+import graphql.Profiler;
+import graphql.execution.directives.OperationDirectivesResolver;
+import graphql.execution.directives.QueryAppliedDirective;
 import graphql.execution.incremental.IncrementalCallState;
 import graphql.execution.instrumentation.Instrumentation;
 import graphql.execution.instrumentation.InstrumentationContext;
 import graphql.execution.instrumentation.InstrumentationState;
-import graphql.execution.instrumentation.dataloader.FallbackDataLoaderDispatchStrategy;
+import graphql.execution.instrumentation.dataloader.DataLoaderDispatchingContextKeys;
+import graphql.execution.instrumentation.dataloader.ExhaustedDataLoaderDispatchStrategy;
 import graphql.execution.instrumentation.dataloader.PerLevelDataLoaderDispatchStrategy;
-import graphql.execution.instrumentation.dataloader.PerLevelDataLoaderDispatchStrategyWithDeferAlwaysDispatch;
 import graphql.execution.instrumentation.parameters.InstrumentationExecuteOperationParameters;
 import graphql.execution.instrumentation.parameters.InstrumentationExecutionParameters;
+import graphql.execution.instrumentation.parameters.InstrumentationReactiveResultsParameters;
+import graphql.execution.reactive.ReactiveSupport;
 import graphql.extensions.ExtensionsBuilder;
 import graphql.incremental.DelayedIncrementalPartialResult;
 import graphql.incremental.IncrementalExecutionResultImpl;
+import graphql.language.Directive;
 import graphql.language.Document;
-import graphql.language.FragmentDefinition;
 import graphql.language.NodeUtil;
 import graphql.language.OperationDefinition;
 import graphql.language.VariableDefinition;
 import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLSchema;
 import graphql.schema.impl.SchemaUtil;
+import graphql.util.FpKit;
+import org.jspecify.annotations.NonNull;
 import org.reactivestreams.Publisher;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
+import static graphql.Directives.EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_DEFINITION;
 import static graphql.execution.ExecutionContextBuilder.newExecutionContextBuilder;
 import static graphql.execution.ExecutionStepInfo.newExecutionStepInfo;
 import static graphql.execution.ExecutionStrategyParameters.newParameters;
@@ -46,12 +59,14 @@ import static java.util.concurrent.CompletableFuture.completedFuture;
 @Internal
 public class Execution {
     private final FieldCollector fieldCollector = new FieldCollector();
+    private final OperationDirectivesResolver operationDirectivesResolver = new OperationDirectivesResolver();
     private final ExecutionStrategy queryStrategy;
     private final ExecutionStrategy mutationStrategy;
     private final ExecutionStrategy subscriptionStrategy;
     private final Instrumentation instrumentation;
     private final ValueUnboxer valueUnboxer;
     private final boolean doNotAutomaticallyDispatchDataLoader;
+
 
     public Execution(ExecutionStrategy queryStrategy,
                      ExecutionStrategy mutationStrategy,
@@ -67,24 +82,37 @@ public class Execution {
         this.doNotAutomaticallyDispatchDataLoader = doNotAutomaticallyDispatchDataLoader;
     }
 
-    public CompletableFuture<ExecutionResult> execute(Document document, GraphQLSchema graphQLSchema, ExecutionId executionId, ExecutionInput executionInput, InstrumentationState instrumentationState) {
-
-        NodeUtil.GetOperationResult getOperationResult = NodeUtil.getOperation(document, executionInput.getOperationName());
-        Map<String, FragmentDefinition> fragmentsByName = getOperationResult.fragmentsByName;
-        OperationDefinition operationDefinition = getOperationResult.operationDefinition;
-
-        RawVariables inputVariables = executionInput.getRawVariables();
-        List<VariableDefinition> variableDefinitions = operationDefinition.getVariableDefinitions();
-
+    public CompletableFuture<ExecutionResult> execute(Document document, GraphQLSchema graphQLSchema, ExecutionId executionId, ExecutionInput executionInput, InstrumentationState instrumentationState, EngineRunningState engineRunningState, Profiler profiler) {
+        NodeUtil.GetOperationResult getOperationResult;
         CoercedVariables coercedVariables;
+        Supplier<NormalizedVariables> normalizedVariableValues;
         try {
-            coercedVariables = ValuesResolver.coerceVariableValues(graphQLSchema, variableDefinitions, inputVariables, executionInput.getGraphQLContext(), executionInput.getLocale());
+            getOperationResult = NodeUtil.getOperation(document, executionInput.getOperationName());
+            coercedVariables = coerceVariableValues(graphQLSchema, executionInput, getOperationResult.operationDefinition);
+            normalizedVariableValues = normalizedVariableValues(graphQLSchema, executionInput, getOperationResult);
         } catch (RuntimeException rte) {
             if (rte instanceof GraphQLError) {
                 return completedFuture(new ExecutionResultImpl((GraphQLError) rte));
             }
             throw rte;
         }
+
+        // before we get started - did they ask us to cancel?
+        AbortExecutionException abortExecutionException = engineRunningState.ifCancelledMakeException();
+        if (abortExecutionException != null) {
+            return completedFuture(abortExecutionException.toExecutionResult());
+        }
+
+        boolean propagateErrorsOnNonNullContractFailure = propagateErrorsOnNonNullContractFailure(getOperationResult.operationDefinition.getDirectives());
+
+        GraphQLContext graphQLContext = executionInput.getGraphQLContext();
+        Locale locale = executionInput.getLocale();
+
+        ResponseMapFactory responseMapFactory = GraphQL.unusualConfiguration(graphQLContext)
+                .responseMapFactory().getOr(ResponseMapFactory.DEFAULT);
+
+        Supplier<Map<OperationDefinition, ImmutableList<QueryAppliedDirective>>> operationDirectives = FpKit.interThreadMemoize(() ->
+                operationDirectivesResolver.resolveDirectives(document, graphQLSchema, coercedVariables, graphQLContext, locale));
 
         ExecutionContext executionContext = newExecutionContextBuilder()
                 .instrumentation(instrumentation)
@@ -95,17 +123,23 @@ public class Execution {
                 .mutationStrategy(mutationStrategy)
                 .subscriptionStrategy(subscriptionStrategy)
                 .context(executionInput.getContext())
-                .graphQLContext(executionInput.getGraphQLContext())
+                .graphQLContext(graphQLContext)
                 .localContext(executionInput.getLocalContext())
                 .root(executionInput.getRoot())
-                .fragmentsByName(fragmentsByName)
+                .fragmentsByName(getOperationResult.fragmentsByName)
                 .coercedVariables(coercedVariables)
+                .normalizedVariableValues(normalizedVariableValues)
                 .document(document)
-                .operationDefinition(operationDefinition)
+                .operationDefinition(getOperationResult.operationDefinition)
+                .operationDirectives(operationDirectives)
                 .dataLoaderRegistry(executionInput.getDataLoaderRegistry())
-                .locale(executionInput.getLocale())
+                .locale(locale)
                 .valueUnboxer(valueUnboxer)
+                .responseMapFactory(responseMapFactory)
                 .executionInput(executionInput)
+                .propagapropagateErrorsOnNonNullContractFailureeErrors(propagateErrorsOnNonNullContractFailure)
+                .engineRunningState(engineRunningState)
+                .profiler(profiler)
                 .build();
 
         executionContext.getGraphQLContext().put(ResultNodesInfo.RESULT_NODES_INFO, executionContext.getResultNodesInfo());
@@ -115,6 +149,25 @@ public class Execution {
         );
         executionContext = instrumentation.instrumentExecutionContext(executionContext, parameters, instrumentationState);
         return executeOperation(executionContext, executionInput.getRoot(), executionContext.getOperationDefinition());
+    }
+
+    private static @NonNull CoercedVariables coerceVariableValues(GraphQLSchema graphQLSchema, ExecutionInput executionInput, OperationDefinition operationDefinition) {
+        RawVariables inputVariables = executionInput.getRawVariables();
+        List<VariableDefinition> variableDefinitions = operationDefinition.getVariableDefinitions();
+        return ValuesResolver.coerceVariableValues(graphQLSchema, variableDefinitions, inputVariables, executionInput.getGraphQLContext(), executionInput.getLocale());
+    }
+
+    private static @NonNull Supplier<NormalizedVariables> normalizedVariableValues(GraphQLSchema graphQLSchema, ExecutionInput executionInput, NodeUtil.GetOperationResult getOperationResult) {
+        Supplier<NormalizedVariables> normalizedVariableValues;
+        RawVariables inputVariables = executionInput.getRawVariables();
+        List<VariableDefinition> variableDefinitions = getOperationResult.operationDefinition.getVariableDefinitions();
+
+        normalizedVariableValues = FpKit.intraThreadMemoize(() ->
+                ValuesResolver.getNormalizedVariableValues(graphQLSchema,
+                        variableDefinitions,
+                        inputVariables,
+                        executionInput.getGraphQLContext(), executionInput.getLocale()));
+        return normalizedVariableValues;
     }
 
 
@@ -128,7 +181,7 @@ public class Execution {
 
         OperationDefinition.Operation operation = operationDefinition.getOperation();
         GraphQLObjectType operationRootType;
-
+        executionContext.getProfiler().operationDefinition(operationDefinition);
         try {
             operationRootType = SchemaUtil.getOperationRootType(executionContext.getGraphQLSchema(), operationDefinition);
         } catch (RuntimeException rte) {
@@ -154,14 +207,12 @@ public class Execution {
         MergedSelectionSet fields = fieldCollector.collectFields(
                 collectorParameters,
                 operationDefinition.getSelectionSet(),
-                Optional.ofNullable(executionContext.getGraphQLContext())
-                        .map(graphqlContext -> graphqlContext.getBoolean(ExperimentalApi.ENABLE_INCREMENTAL_SUPPORT))
-                        .orElse(false)
+                executionContext.hasIncrementalSupport()
         );
 
         ResultPath path = ResultPath.rootPath();
         ExecutionStepInfo executionStepInfo = newExecutionStepInfo().type(operationRootType).path(path).build();
-        NonNullableFieldValidator nonNullableFieldValidator = new NonNullableFieldValidator(executionContext, executionStepInfo);
+        NonNullableFieldValidator nonNullableFieldValidator = new NonNullableFieldValidator(executionContext);
 
         ExecutionStrategyParameters parameters = newParameters()
                 .executionStepInfo(executionStepInfo)
@@ -208,9 +259,17 @@ public class Execution {
         return result.thenApply(er -> {
             IncrementalCallState incrementalCallState = executionContext.getIncrementalCallState();
             if (incrementalCallState.getIncrementalCallsDetected()) {
+                InstrumentationReactiveResultsParameters parameters = new InstrumentationReactiveResultsParameters(executionContext, InstrumentationReactiveResultsParameters.ResultType.DEFER);
+                InstrumentationContext<Void> ctx = nonNullCtx(executionContext.getInstrumentation().beginReactiveResults(parameters, executionContext.getInstrumentationState()));
+
                 // we start the rest of the query now to maximize throughput.  We have the initial important results,
                 // and now we can start the rest of the calls as early as possible (even before someone subscribes)
                 Publisher<DelayedIncrementalPartialResult> publisher = incrementalCallState.startDeferredCalls();
+                ctx.onDispatched();
+
+                //
+                // wrap this Publisher into one that can call us back when the publishing is done either in error or successful
+                publisher = ReactiveSupport.whenPublisherFinishes(publisher, throwable -> ctx.onCompleted(null, throwable));
 
                 return IncrementalExecutionResultImpl.fromExecutionResult(er)
                         // "hasNext" can, in theory, be "false" when all the incremental items are delivered in the
@@ -228,18 +287,13 @@ public class Execution {
         if (executionContext.getDataLoaderRegistry() == EMPTY_DATALOADER_REGISTRY || doNotAutomaticallyDispatchDataLoader) {
             return DataLoaderDispatchStrategy.NO_OP;
         }
-        if (! executionContext.isSubscriptionOperation()) {
-            boolean deferEnabled = Optional.ofNullable(executionContext.getGraphQLContext())
-                    .map(graphqlContext -> graphqlContext.getBoolean(ExperimentalApi.ENABLE_INCREMENTAL_SUPPORT))
-                    .orElse(false);
-
-            // Dedicated strategy for defer support, for safety purposes.
-            return deferEnabled ?
-                    new PerLevelDataLoaderDispatchStrategyWithDeferAlwaysDispatch(executionContext) :
-                    new PerLevelDataLoaderDispatchStrategy(executionContext);
-        } else {
-            return new FallbackDataLoaderDispatchStrategy(executionContext);
+        if (executionContext.getGraphQLContext().getBoolean(DataLoaderDispatchingContextKeys.ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, false)) {
+            if (executionContext.getGraphQLContext().getBoolean(DataLoaderDispatchingContextKeys.ENABLE_DATA_LOADER_CHAINING, false)) {
+                throw new GraphQLException("enabling data loader chaining and exhausted dispatching at the same time ambiguous");
+            }
+            return new ExhaustedDataLoaderDispatchStrategy(executionContext);
         }
+        return new PerLevelDataLoaderDispatchStrategy(executionContext);
     }
 
 
@@ -261,5 +315,14 @@ public class Execution {
             executionResult = extensionsBuilder.setExtensions(executionResult);
         }
         return executionResult;
+    }
+
+    private boolean propagateErrorsOnNonNullContractFailure(List<Directive> directives) {
+        boolean jvmWideEnabled = Directives.isExperimentalDisableErrorPropagationDirectiveEnabled();
+        if (!jvmWideEnabled) {
+            return true;
+        }
+        Directive foundDirective = NodeUtil.findNodeByName(directives, EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_DEFINITION.getName());
+        return foundDirective == null;
     }
 }

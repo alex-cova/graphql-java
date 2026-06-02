@@ -1,5 +1,6 @@
 package graphql.schema;
 
+import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import graphql.Directives;
@@ -18,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import org.jspecify.annotations.NullUnmarked;
 import java.util.function.UnaryOperator;
 
 import static graphql.Assert.assertNotNull;
@@ -54,8 +56,8 @@ public class GraphQLInputObjectType implements GraphQLNamedInputType, GraphQLUnm
                                    InputObjectTypeDefinition definition,
                                    List<InputObjectTypeExtensionDefinition> extensionDefinitions) {
         assertValidName(name);
-        assertNotNull(fields, () -> "fields can't be null");
-        assertNotNull(directives, () -> "directives cannot be null");
+        assertNotNull(fields, "fields can't be null");
+        assertNotNull(directives, "directives cannot be null");
 
         this.name = name;
         this.description = description;
@@ -152,7 +154,8 @@ public class GraphQLInputObjectType implements GraphQLNamedInputType, GraphQLUnm
 
     @Override
     public List<GraphQLInputObjectField> getFieldDefinitions() {
-        return ImmutableList.copyOf(fieldMap.values());
+        ImmutableCollection<GraphQLInputObjectField> values = fieldMap.values();
+        return values instanceof ImmutableList<?> ? (ImmutableList<GraphQLInputObjectField>) values : ImmutableList.copyOf(values);
     }
 
     public InputObjectTypeDefinition getDefinition() {
@@ -251,6 +254,7 @@ public class GraphQLInputObjectType implements GraphQLNamedInputType, GraphQLUnm
     }
 
     @PublicApi
+    @NullUnmarked
     public static class Builder extends GraphqlDirectivesContainerTypeBuilder<Builder, Builder> {
         private InputObjectTypeDefinition definition;
         private List<InputObjectTypeExtensionDefinition> extensionDefinitions = emptyList();
@@ -279,7 +283,7 @@ public class GraphQLInputObjectType implements GraphQLNamedInputType, GraphQLUnm
         }
 
         public Builder field(GraphQLInputObjectField field) {
-            assertNotNull(field, () -> "field can't be null");
+            assertNotNull(field, "field can't be null");
             fields.put(field.getName(), field);
             return this;
         }
@@ -298,7 +302,7 @@ public class GraphQLInputObjectType implements GraphQLNamedInputType, GraphQLUnm
          * @return this
          */
         public Builder field(UnaryOperator<GraphQLInputObjectField.Builder> builderFunction) {
-            assertNotNull(builderFunction, () -> "builderFunction should not be null");
+            assertNotNull(builderFunction, "builderFunction should not be null");
             GraphQLInputObjectField.Builder builder = GraphQLInputObjectField.newInputObjectField();
             builder = builderFunction.apply(builder);
             return field(builder);

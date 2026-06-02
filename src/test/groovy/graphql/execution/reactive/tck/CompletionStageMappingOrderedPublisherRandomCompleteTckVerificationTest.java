@@ -1,9 +1,8 @@
 package graphql.execution.reactive.tck;
 
 import graphql.execution.reactive.CompletionStageMappingOrderedPublisher;
-import graphql.execution.reactive.CompletionStageMappingPublisher;
 import io.reactivex.Flowable;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.tck.PublisherVerification;
 import org.reactivestreams.tck.TestEnvironment;
@@ -13,11 +12,16 @@ import java.time.Duration;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 /**
  * This uses the reactive streams TCK to test that our CompletionStageMappingPublisher meets spec
- * when it's got CFs that complete at different times
+ * when it's got CFs that complete at different times.
+ * <p>
+ * Uses a shared single-thread executor per publisher so CFs complete sequentially — see
+ * CompletionStageMappingOrderedPublisherTckVerificationTest for details on why.
  */
 @Test
 public class CompletionStageMappingOrderedPublisherRandomCompleteTckVerificationTest extends PublisherVerification<String> {
@@ -48,8 +52,9 @@ public class CompletionStageMappingOrderedPublisherRandomCompleteTckVerification
         return true;
     }
 
-    @NotNull
+    @NonNull
     private static Function<Integer, CompletionStage<String>> mapperFunc() {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
         return i -> CompletableFuture.supplyAsync(() -> {
             int ms = rand(0, 5);
             try {
@@ -58,7 +63,7 @@ public class CompletionStageMappingOrderedPublisherRandomCompleteTckVerification
                 throw new RuntimeException(e);
             }
             return i + "!";
-        });
+        }, executor);
     }
 
     static Random rn = new Random();

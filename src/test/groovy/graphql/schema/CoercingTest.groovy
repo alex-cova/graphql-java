@@ -1,6 +1,7 @@
 package graphql.schema
 
 import graphql.ExecutionInput
+import graphql.GraphQLContext
 import graphql.TestUtil
 import graphql.analysis.MaxQueryDepthInstrumentation
 import graphql.language.ArrayValue
@@ -243,6 +244,11 @@ class CoercingTest extends Specification {
         @Override
         Object parseLiteral(Object input) throws CoercingParseLiteralException {
             return input
+        }
+
+        @Override
+        StringValue valueToLiteral(Object input, GraphQLContext graphQLContext, Locale locale) {
+            return new StringValue(input.toString())
         }
     })
     .build()

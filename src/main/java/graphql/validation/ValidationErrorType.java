@@ -2,10 +2,11 @@ package graphql.validation;
 
 
 import graphql.PublicApi;
+import org.jspecify.annotations.NullMarked;
 
 @PublicApi
+@NullMarked
 public enum ValidationErrorType implements ValidationErrorClassification {
-
     MaxValidationErrorsReached,
     DefaultForNonNullArgument,
     WrongType,
@@ -43,5 +44,8 @@ public enum ValidationErrorType implements ValidationErrorClassification {
     NullValueForNonNullArgument,
     SubscriptionMultipleRootFields,
     SubscriptionIntrospectionRootField,
-    UniqueObjectFieldName
+    UniqueObjectFieldName,
+    UnknownOperation,
+    MaxQueryDepthExceeded,
+    MaxQueryFieldsExceeded
 }

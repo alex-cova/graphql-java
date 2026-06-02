@@ -7,6 +7,9 @@ import graphql.PublicApi;
 import graphql.collect.ImmutableKit;
 import graphql.util.TraversalControl;
 import graphql.util.TraverserContext;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -23,11 +26,12 @@ import static graphql.language.NodeChildrenContainer.newNodeChildrenContainer;
  * Provided to the DataFetcher, therefore public API
  */
 @PublicApi
-public class FragmentDefinition extends AbstractNode<FragmentDefinition> implements Definition<FragmentDefinition>, SelectionSetContainer<FragmentDefinition>, DirectivesContainer<FragmentDefinition>, NamedNode<FragmentDefinition> {
+@NullMarked
+public class FragmentDefinition extends AbstractDescribedNode<FragmentDefinition> implements Definition<FragmentDefinition>, SelectionSetContainer<FragmentDefinition>, DirectivesContainer<FragmentDefinition>, NamedNode<FragmentDefinition> {
 
     private final String name;
     private final TypeName typeCondition;
-    private final ImmutableList<Directive> directives;
+    private final NodeUtil.DirectivesHolder directives;
     private final SelectionSet selectionSet;
 
     public static final String CHILD_TYPE_CONDITION = "typeCondition";
@@ -39,14 +43,15 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
                                  TypeName typeCondition,
                                  List<Directive> directives,
                                  SelectionSet selectionSet,
-                                 SourceLocation sourceLocation,
+                                 @Nullable Description description,
+                                 @Nullable SourceLocation sourceLocation,
                                  List<Comment> comments,
                                  IgnoredChars ignoredChars,
                                  Map<String, String> additionalData) {
-        super(sourceLocation, comments, ignoredChars, additionalData);
+        super(sourceLocation, comments, ignoredChars, additionalData, description);
         this.name = name;
         this.typeCondition = typeCondition;
-        this.directives = ImmutableList.copyOf(directives);
+        this.directives = NodeUtil.DirectivesHolder.of(directives);
         this.selectionSet = selectionSet;
     }
 
@@ -62,9 +67,23 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
 
     @Override
     public List<Directive> getDirectives() {
-        return directives;
+        return directives.getDirectives();
     }
 
+    @Override
+    public Map<String, List<Directive>> getDirectivesByName() {
+        return directives.getDirectivesByName();
+    }
+
+    @Override
+    public List<Directive> getDirectives(String directiveName) {
+        return directives.getDirectives(directiveName);
+    }
+
+    @Override
+    public boolean hasDirective(String directiveName) {
+        return directives.hasDirective(directiveName);
+    }
 
     @Override
     public SelectionSet getSelectionSet() {
@@ -75,7 +94,7 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
     public List<Node> getChildren() {
         List<Node> result = new ArrayList<>();
         result.add(typeCondition);
-        result.addAll(directives);
+        result.addAll(directives.getDirectives());
         result.add(selectionSet);
         return result;
     }
@@ -84,7 +103,7 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
     public NodeChildrenContainer getNamedChildren() {
         return newNodeChildrenContainer()
                 .child(CHILD_TYPE_CONDITION, typeCondition)
-                .children(CHILD_DIRECTIVES, directives)
+                .children(CHILD_DIRECTIVES, directives.getDirectives())
                 .child(CHILD_SELECTION_SET, selectionSet)
                 .build();
     }
@@ -92,14 +111,14 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
     @Override
     public FragmentDefinition withNewChildren(NodeChildrenContainer newChildren) {
         return transform(builder -> builder
-                .typeCondition(newChildren.getChildOrNull(CHILD_TYPE_CONDITION))
+                .typeCondition(assertNotNull(newChildren.getChildOrNull(CHILD_TYPE_CONDITION)))
                 .directives(newChildren.getChildren(CHILD_DIRECTIVES))
-                .selectionSet(newChildren.getChildOrNull(CHILD_SELECTION_SET))
+                .selectionSet(assertNotNull(newChildren.getChildOrNull(CHILD_SELECTION_SET)))
         );
     }
 
     @Override
-    public boolean isEqualTo(Node o) {
+    public boolean isEqualTo(@Nullable Node o) {
         if (this == o) {
             return true;
         }
@@ -115,9 +134,10 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
     @Override
     public FragmentDefinition deepCopy() {
         return new FragmentDefinition(name,
-                deepCopy(typeCondition),
-                deepCopy(directives),
-                deepCopy(selectionSet),
+                assertNotNull(deepCopy(typeCondition)),
+                assertNotNull(deepCopy(directives.getDirectives())),
+                assertNotNull(deepCopy(selectionSet)),
+                description,
                 getSourceLocation(),
                 getComments(),
                 getIgnoredChars(),
@@ -149,12 +169,14 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
         return builder.build();
     }
 
+    @NullUnmarked
     public static final class Builder implements NodeDirectivesBuilder {
         private SourceLocation sourceLocation;
         private ImmutableList<Comment> comments = emptyList();
 
         private String name;
         private TypeName typeCondition;
+        private Description description;
         private ImmutableList<Directive> directives = emptyList();
         private SelectionSet selectionSet;
         private IgnoredChars ignoredChars = IgnoredChars.EMPTY;
@@ -168,6 +190,7 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
             this.comments = ImmutableList.copyOf(existing.getComments());
             this.name = existing.getName();
             this.typeCondition = existing.getTypeCondition();
+            this.description = existing.getDescription();
             this.directives = ImmutableList.copyOf(existing.getDirectives());
             this.selectionSet = existing.getSelectionSet();
             this.ignoredChars = existing.getIgnoredChars();
@@ -192,6 +215,11 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
 
         public Builder typeCondition(TypeName typeCondition) {
             this.typeCondition = typeCondition;
+            return this;
+        }
+
+        public Builder description(Description description) {
+            this.description = description;
             return this;
         }
 
@@ -228,7 +256,7 @@ public class FragmentDefinition extends AbstractNode<FragmentDefinition> impleme
 
 
         public FragmentDefinition build() {
-            return new FragmentDefinition(name, typeCondition, directives, selectionSet, sourceLocation, comments, ignoredChars, additionalData);
+            return new FragmentDefinition(assertNotNull(name), assertNotNull(typeCondition), directives, assertNotNull(selectionSet), description, sourceLocation, comments, ignoredChars, additionalData);
         }
     }
 }

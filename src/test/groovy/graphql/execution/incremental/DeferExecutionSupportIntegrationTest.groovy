@@ -7,6 +7,7 @@ import graphql.ExecutionResult
 import graphql.ExperimentalApi
 import graphql.GraphQL
 import graphql.GraphqlErrorBuilder
+import graphql.GraphQLContext
 import graphql.TestUtil
 import graphql.execution.DataFetcherResult
 import graphql.execution.pubsub.CapturingSubscriber
@@ -18,11 +19,18 @@ import graphql.schema.DataFetchingEnvironment
 import graphql.schema.TypeResolver
 import graphql.schema.idl.RuntimeWiring
 import org.awaitility.Awaitility
+import org.dataloader.BatchLoader
+import org.dataloader.DataLoader
+import org.dataloader.DataLoaderFactory
+import org.dataloader.DataLoaderRegistry
 import org.reactivestreams.Publisher
 import spock.lang.Specification
 import spock.lang.Unroll
 
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring
 
@@ -62,6 +70,8 @@ class DeferExecutionSupportIntegrationTest extends Specification {
                 typeMismatchError: [String]
                 nonNullableError: String!
                 wordCount: Int
+                fieldWithDataLoader1: String
+                fieldWithDataLoader2: String
             }
             
             type Comment {
@@ -88,6 +98,13 @@ class DeferExecutionSupportIntegrationTest extends Specification {
 
     private static DataFetcher resolve(Object value, Integer sleepMs) {
         return resolve(value, sleepMs, false)
+    }
+
+    private static DataFetcher fieldWithDataLoader(String key) {
+        return (dfe) -> {
+            def dataLoader = dfe.getDataLoader("someDataLoader")
+            return dataLoader.load(dfe.getSource().id + "-" + key)
+        };
     }
 
     private static DataFetcher resolve(Object value, Integer sleepMs, boolean allowMultipleCalls) {
@@ -163,6 +180,8 @@ class DeferExecutionSupportIntegrationTest extends Specification {
                         .dataFetcher("item", resolveItem())
                 )
                 .type(newTypeWiring("Post").dataFetcher("summary", resolve("A summary", 10)))
+                .type(newTypeWiring("Post").dataFetcher("fieldWithDataLoader1", fieldWithDataLoader("fieldWithDataLoader1")))
+                .type(newTypeWiring("Post").dataFetcher("fieldWithDataLoader2", fieldWithDataLoader("fieldWithDataLoader2")))
                 .type(newTypeWiring("Post").dataFetcher("text", resolve("The full text", 100)))
                 .type(newTypeWiring("Post").dataFetcher("wordCount", resolve(45999, 10, true)))
                 .type(newTypeWiring("Post").dataFetcher("latestComment", resolve([title: "Comment title"], 10)))
@@ -1604,6 +1623,258 @@ class DeferExecutionSupportIntegrationTest extends Specification {
         incrementalResults.any { it.incremental[0].path == ["posts", 2] }
     }
 
+
+    def "two fragments one with defer and one without"() {
+        given:
+        def query = '''
+            query {
+                post {
+                 text
+                ...f1 @defer
+                ...f2
+                }
+            }
+            
+         fragment f1 on Post {
+               summary
+          }
+         fragment f2 on Post {
+           summary
+          }
+        '''
+        when:
+        def result = executeQuery(query)
+
+        then:
+        result.toSpecification() == [
+                data: [post: [summary: "A summary", text: "The full text"]]
+        ]
+        !(result instanceof IncrementalExecutionResult)
+
+
+    }
+
+    def "two fragments one same type"() {
+        given:
+        def query = '''
+            query {
+                post {
+                id
+                ...f1 
+                ...f2 @defer
+                }
+            }
+            
+         fragment f1 on Post {
+               text
+          }
+         fragment f2 on Post {
+           summary
+          }
+        '''
+        when:
+        def initialResult = executeQuery(query)
+
+        then:
+        initialResult.toSpecification() == [
+                data   : [post: [id: "1001", text: "The full text"]],
+                hasNext: true
+        ]
+
+        when:
+        def incrementalResults = getIncrementalResults(initialResult)
+
+        then:
+
+        incrementalResults.size() == 1
+        incrementalResults[0] == [incremental: [[path: ["post"], data: [summary: "A summary"]]],
+                                  hasNext    : false
+        ]
+
+    }
+
+    def "dataloader used inside defer"() {
+        given:
+        def query = '''
+            query {
+                post {
+                id
+                ...@defer {
+                    fieldWithDataLoader1
+                    fieldWithDataLoader2
+                }
+              }
+            }
+        '''
+
+        def batchLoaderCallCount = new AtomicInteger(0)
+        when:
+        def initialResult = executeQuery(query, true, [:], batchLoaderCallCount)
+
+        then:
+        initialResult.toSpecification() == [
+                data   : [post: [id: "1001"]],
+                hasNext: true
+        ]
+
+        when:
+        def incrementalResults = getIncrementalResults(initialResult)
+
+        then:
+        batchLoaderCallCount.get() == 1
+        incrementalResults.size() == 1
+        incrementalResults[0] == [incremental: [[path: ["post"], data: [fieldWithDataLoader1: "1001-fieldWithDataLoader1", fieldWithDataLoader2: "1001-fieldWithDataLoader2"]]],
+                                  hasNext    : false
+        ]
+
+    }
+
+    def "eager defer starts before initial result completes when ENABLE_EAGER_DEFER_START"() {
+        given:
+        def deferStarted = new CountDownLatch(1)
+        def allowDeferredComplete = new CountDownLatch(1)
+
+        def runtimeWiring = RuntimeWiring.newRuntimeWiring()
+                .type(newTypeWiring("Query")
+                        .dataFetcher("post", resolve([id: "1001"]))
+                )
+                .type(newTypeWiring("Query").dataFetcher("hello", resolve("world", 4000)))
+                .type(newTypeWiring("Post").dataFetcher("summary", { env ->
+                    deferStarted.countDown()
+                    allowDeferredComplete.await(2, TimeUnit.SECONDS)
+                    CompletableFuture.completedFuture("A summary")
+                } as DataFetcher))
+                .type(newTypeWiring("Item").typeResolver(itemTypeResolver()))
+                .build()
+
+        def schema = TestUtil.schema(schemaSpec, runtimeWiring)
+                .transform({ b -> b.additionalDirective(Directives.DeferDirective) })
+        def testGraphQL = GraphQL.newGraphQL(schema).build()
+
+        def ctx = GraphQLContext.newContext().build()
+        ctx.put(ExperimentalApi.ENABLE_INCREMENTAL_SUPPORT, true)
+        ctx.put(IncrementalExecutionContextKeys.ENABLE_EAGER_DEFER_START, true)
+
+        def query = '''
+              query {
+                hello                  
+                ... @defer { post { summary } }  
+              }
+            '''
+
+        when:
+        def executionInput = ExecutionInput.newExecutionInput()
+                .graphQLContext([(ExperimentalApi.ENABLE_INCREMENTAL_SUPPORT): true, (IncrementalExecutionContextKeys.ENABLE_EAGER_DEFER_START): true])
+                .query(query)
+                .build()
+        def execFuture = CompletableFuture.supplyAsync {
+            testGraphQL.execute(executionInput)
+        }
+
+        then:
+        // Deferred fetcher starts while initial result is still computing
+        assert deferStarted.await(2000, TimeUnit.MILLISECONDS)
+        assert !execFuture.isDone()
+
+        when:
+        allowDeferredComplete.countDown()
+        def initialResult = execFuture.join() as IncrementalExecutionResult
+
+        then:
+        assert initialResult.toSpecification() == [
+                data   : [hello: "world"],
+                hasNext: true
+        ]
+
+        when:
+        def incrementalResults = getIncrementalResults(initialResult)
+
+        then:
+        incrementalResults == [
+                [
+                        hasNext    : false,
+                        incremental: [
+                                [
+                                        path: [],
+                                        data: [post: [summary: "A summary"]]
+                                ]
+                        ]
+                ]
+        ]
+    }
+
+
+    def "incremental starts only after initial result when eager start disabled"() {
+        given:
+        def deferStarted = new CountDownLatch(1)
+        def allowDeferredComplete = new CountDownLatch(1)
+
+        def runtimeWiring = RuntimeWiring.newRuntimeWiring()
+                .type(newTypeWiring("Query")
+                        .dataFetcher("post", resolve([id: "1001"]))
+                )
+                .type(newTypeWiring("Query").dataFetcher("hello", resolve("world", 300)))
+                .type(newTypeWiring("Post").dataFetcher("summary", { env ->
+                    deferStarted.countDown()
+                    allowDeferredComplete.await(2, TimeUnit.SECONDS)
+                    CompletableFuture.completedFuture("A summary")
+                } as DataFetcher))
+                .type(newTypeWiring("Item").typeResolver(itemTypeResolver()))
+                .build()
+
+        def schema = TestUtil.schema(schemaSpec, runtimeWiring)
+                .transform({ b -> b.additionalDirective(Directives.DeferDirective) })
+        def testGraphQL = GraphQL.newGraphQL(schema).build()
+
+        def query = '''
+              query {
+                hello                  
+                ... @defer { post { summary } }  
+              }
+            '''
+
+        when:
+        def executionInput = ExecutionInput.newExecutionInput()
+                .graphQLContext([(ExperimentalApi.ENABLE_INCREMENTAL_SUPPORT): true]) // no eager flag
+                .query(query)
+                .build()
+        def execFuture = CompletableFuture.supplyAsync {
+            testGraphQL.execute(executionInput)
+        }
+
+        then:
+        assert !deferStarted.await(100, TimeUnit.MILLISECONDS)
+        assert !execFuture.isDone()
+
+        when:
+        def initialResult = execFuture.join() as IncrementalExecutionResult
+
+        then:
+        assert initialResult.toSpecification() == [
+                data   : [hello: "world"],
+                hasNext: true
+        ]
+        assert deferStarted.count == 1 // still not started, no subscriber yet
+
+        when:
+        allowDeferredComplete.countDown()
+        def incrementalResults = getIncrementalResults(initialResult)
+
+        then:
+        incrementalResults == [
+                [
+                        hasNext    : false,
+                        incremental: [
+                                [
+                                        path: [],
+                                        data: [post: [summary: "A summary"]]
+                                ]
+                        ]
+                ]
+        ]
+    }
+
+
     private ExecutionResult executeQuery(String query) {
         return this.executeQuery(query, true, [:])
     }
@@ -1612,12 +1883,22 @@ class DeferExecutionSupportIntegrationTest extends Specification {
         return this.executeQuery(query, true, variables)
     }
 
-    private ExecutionResult executeQuery(String query, boolean incrementalSupport, Map<String, Object> variables) {
+    private ExecutionResult executeQuery(String query, boolean incrementalSupport, Map<String, Object> variables, AtomicInteger batchLoaderCallCount = null) {
+        BatchLoader batchLoader = { keys ->
+            if (batchLoaderCallCount != null) {
+                batchLoaderCallCount.incrementAndGet()
+            }
+            return CompletableFuture.completedFuture(keys)
+        }
+        DataLoader dl = DataLoaderFactory.newDataLoader(batchLoader)
+        DataLoaderRegistry dataLoaderRegistry = new DataLoaderRegistry();
+        dataLoaderRegistry.register("someDataLoader", dl)
         return graphQL.execute(
                 ExecutionInput.newExecutionInput()
                         .graphQLContext([(ExperimentalApi.ENABLE_INCREMENTAL_SUPPORT): incrementalSupport])
                         .query(query)
                         .variables(variables)
+                        .dataLoaderRegistry(dataLoaderRegistry)
                         .build()
         )
     }

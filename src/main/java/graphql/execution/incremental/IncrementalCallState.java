@@ -103,4 +103,9 @@ public class IncrementalCallState {
     public Publisher<DelayedIncrementalPartialResult> startDeferredCalls() {
         return publisher.get();
     }
+
+    public void startDrainingNow() {
+        drainIncrementalCalls();
+    }
+
 }

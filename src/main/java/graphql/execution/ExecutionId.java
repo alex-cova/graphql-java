@@ -3,11 +3,13 @@ package graphql.execution;
 import graphql.Assert;
 import graphql.PublicApi;
 import graphql.util.IdGenerator;
+import org.jspecify.annotations.NullMarked;
 
 /**
  * This opaque identifier is used to identify a unique query execution
  */
 @PublicApi
+@NullMarked
 public class ExecutionId {
 
     /**
@@ -33,7 +35,7 @@ public class ExecutionId {
     private final String id;
 
     private ExecutionId(String id) {
-        Assert.assertNotNull(id, () -> "You must provided a non null id");
+        Assert.assertNotNull(id, "You must provided a non null id");
         this.id = id;
     }
 

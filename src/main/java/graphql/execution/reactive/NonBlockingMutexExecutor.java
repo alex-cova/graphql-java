@@ -2,7 +2,7 @@ package graphql.execution.reactive;
 
 
 import graphql.Internal;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
@@ -37,8 +37,8 @@ class NonBlockingMutexExecutor implements Executor {
     private final AtomicReference<RunNode> last = new AtomicReference<>();
 
     @Override
-    public void execute(final @NotNull Runnable command) {
-        final RunNode newNode = new RunNode(assertNotNull(command, () -> "Runnable must not be null"));
+    public void execute(final @NonNull Runnable command) {
+        final RunNode newNode = new RunNode(assertNotNull(command,  "Runnable must not be null"));
         final RunNode prevLast = last.getAndSet(newNode);
         if (prevLast != null) {
             prevLast.lazySet(newNode);

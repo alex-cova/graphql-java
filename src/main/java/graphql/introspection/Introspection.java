@@ -7,6 +7,7 @@ import graphql.ExecutionResult;
 import graphql.GraphQLContext;
 import graphql.Internal;
 import graphql.PublicApi;
+import graphql.collect.ImmutableKit;
 import graphql.execution.ExecutionContext;
 import graphql.execution.MergedField;
 import graphql.execution.MergedSelectionSet;
@@ -36,7 +37,7 @@ import graphql.schema.GraphQLScalarType;
 import graphql.schema.GraphQLSchema;
 import graphql.schema.GraphQLUnionType;
 import graphql.schema.InputValueWithState;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -48,7 +49,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static graphql.Assert.assertTrue;
 import static graphql.Scalars.GraphQLBoolean;
@@ -116,7 +116,6 @@ public class Introspection {
     public static Optional<ExecutionResult> isIntrospectionSensible(MergedSelectionSet mergedSelectionSet, ExecutionContext executionContext) {
         GraphQLContext graphQLContext = executionContext.getGraphQLContext();
 
-        boolean isIntrospection = false;
         for (String key : mergedSelectionSet.getKeys()) {
             String fieldName = mergedSelectionSet.getSubField(key).getName();
             if (fieldName.equals(SchemaMetaFieldDef.getName())
@@ -124,17 +123,13 @@ public class Introspection {
                 if (!isIntrospectionEnabled(graphQLContext)) {
                     return mkDisabledError(mergedSelectionSet.getSubField(key));
                 }
-                isIntrospection = true;
                 break;
             }
-        }
-        if (isIntrospection) {
-            return GoodFaithIntrospection.checkIntrospection(executionContext);
         }
         return Optional.empty();
     }
 
-    @NotNull
+    @NonNull
     private static Optional<ExecutionResult> mkDisabledError(MergedField schemaField) {
         IntrospectionDisabledError error = new IntrospectionDisabledError(schemaField.getSingleField().getSourceLocation());
         return Optional.of(ExecutionResult.newExecutionResult().addError(error).build());
@@ -199,7 +194,7 @@ public class Introspection {
     public static final GraphQLEnumType __TypeKind = GraphQLEnumType.newEnum()
             .name("__TypeKind")
             .description("An enum describing what kind of type a given __Type is")
-            .value("SCALAR", TypeKind.SCALAR, "Indicates this type is a scalar. 'specifiedByURL' is a valid field")
+            .value("SCALAR", TypeKind.SCALAR, "Indicates this type is a scalar. `specifiedByURL` is a valid field")
             .value("OBJECT", TypeKind.OBJECT, "Indicates this type is an object. `fields` and `interfaces` are valid fields.")
             .value("INTERFACE", TypeKind.INTERFACE, "Indicates this type is an interface. `fields` and `possibleTypes` are valid fields.")
             .value("UNION", TypeKind.UNION, "Indicates this type is a union. `possibleTypes` is a valid field.")
@@ -338,7 +333,7 @@ public class Introspection {
                     .type(nonNull(list(nonNull(__InputValue))))
                     .argument(newArgument()
                             .name("includeDeprecated")
-                            .type(GraphQLBoolean)
+                            .type(nonNull(GraphQLBoolean))
                             .defaultValueProgrammatic(false)))
             .field(newFieldDefinition()
                     .name("type")
@@ -356,9 +351,8 @@ public class Introspection {
             Object type = environment.getSource();
             GraphQLFieldDefinition fieldDef = (GraphQLFieldDefinition) type;
             Boolean includeDeprecated = environment.getArgument("includeDeprecated");
-            return fieldDef.getArguments().stream()
-                    .filter(arg -> includeDeprecated || !arg.isDeprecated())
-                    .collect(Collectors.toList());
+            return ImmutableKit.filter(fieldDef.getArguments(),
+                    arg -> includeDeprecated || !arg.isDeprecated());
         };
         register(__Field, "name", nameDataFetcher);
         register(__Field, "description", descriptionDataFetcher);
@@ -406,9 +400,8 @@ public class Introspection {
             if (includeDeprecated) {
                 return fieldDefinitions;
             }
-            return fieldDefinitions.stream()
-                    .filter(field -> !field.isDeprecated())
-                    .collect(Collectors.toList());
+            return ImmutableKit.filter(fieldDefinitions,
+                    field -> !field.isDeprecated());
         }
         return null;
     };
@@ -444,9 +437,8 @@ public class Introspection {
             if (includeDeprecated) {
                 return values;
             }
-            return values.stream()
-                    .filter(enumValue -> !enumValue.isDeprecated())
-                    .collect(Collectors.toList());
+            return ImmutableKit.filter(values,
+                    enumValue -> !enumValue.isDeprecated());
         }
         return null;
     };
@@ -463,9 +455,8 @@ public class Introspection {
             if (includeDeprecated) {
                 return inputFields;
             }
-            return inputFields
-                    .stream().filter(inputField -> !inputField.isDeprecated())
-                    .collect(Collectors.toList());
+            return ImmutableKit.filter(inputFields,
+                    inputField -> !inputField.isDeprecated());
         }
         return null;
     };
@@ -510,7 +501,7 @@ public class Introspection {
                     .type(list(nonNull(__Field)))
                     .argument(newArgument()
                             .name("includeDeprecated")
-                            .type(GraphQLBoolean)
+                            .type(nonNull(GraphQLBoolean))
                             .defaultValueProgrammatic(false)))
             .field(newFieldDefinition()
                     .name("interfaces")
@@ -523,14 +514,14 @@ public class Introspection {
                     .type(list(nonNull(__EnumValue)))
                     .argument(newArgument()
                             .name("includeDeprecated")
-                            .type(GraphQLBoolean)
+                            .type(nonNull(GraphQLBoolean))
                             .defaultValueProgrammatic(false)))
             .field(newFieldDefinition()
                     .name("inputFields")
                     .type(list(nonNull(__InputValue)))
                     .argument(newArgument()
                             .name("includeDeprecated")
-                            .type(GraphQLBoolean)
+                            .type(nonNull(GraphQLBoolean))
                             .defaultValueProgrammatic(false)))
             .field(newFieldDefinition()
                     .name("ofType")
@@ -638,7 +629,7 @@ public class Introspection {
                     .type(nonNull(list(nonNull(__InputValue))))
                     .argument(newArgument()
                             .name("includeDeprecated")
-                            .type(GraphQLBoolean)
+                            .type(nonNull(GraphQLBoolean))
                             .defaultValueProgrammatic(false)))
             .build();
 
@@ -650,9 +641,8 @@ public class Introspection {
         IntrospectionDataFetcher<?> argsDataFetcher = environment -> {
             GraphQLDirective directive = environment.getSource();
             Boolean includeDeprecated = environment.getArgument("includeDeprecated");
-            return directive.getArguments().stream()
-                    .filter(arg -> includeDeprecated || !arg.isDeprecated())
-                    .collect(Collectors.toList());
+            return ImmutableKit.filter(directive.getArguments(),
+                    arg -> includeDeprecated || !arg.isDeprecated());
         };
         register(__Directive, "name", nameDataFetcher);
         register(__Directive, "description", descriptionDataFetcher);
@@ -683,11 +673,11 @@ public class Introspection {
                     .type(__Type))
             .field(newFieldDefinition()
                     .name("directives")
-                    .description("'A list of all directives supported by this server.")
+                    .description("A list of all directives supported by this server.")
                     .type(nonNull(list(nonNull(__Directive)))))
             .field(newFieldDefinition()
                     .name("subscriptionType")
-                    .description("'If this server support subscription, the type that subscription operations will be rooted at.")
+                    .description("If this server support subscription, the type that subscription operations will be rooted at.")
                     .type(__Type))
             .build();
 

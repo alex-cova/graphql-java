@@ -12,13 +12,14 @@ import graphql.execution.instrumentation.parameters.InstrumentationExecutionStra
 import graphql.execution.instrumentation.parameters.InstrumentationFieldCompleteParameters;
 import graphql.execution.instrumentation.parameters.InstrumentationFieldFetchParameters;
 import graphql.execution.instrumentation.parameters.InstrumentationFieldParameters;
+import graphql.execution.instrumentation.parameters.InstrumentationReactiveResultsParameters;
 import graphql.execution.instrumentation.parameters.InstrumentationValidationParameters;
 import graphql.language.Document;
 import graphql.schema.DataFetcher;
 import graphql.schema.GraphQLSchema;
 import graphql.validation.ValidationError;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -121,6 +122,21 @@ public interface Instrumentation {
     }
 
     /**
+     * This is called just before the execution of any reactive results, namely incremental deferred results or subscriptions.  When the {@link org.reactivestreams.Publisher}
+     * finally ends (with either a {@link Throwable} or none) then the {@link InstrumentationContext} wil be called back to say the reactive results
+     * have finished.
+     *
+     * @param parameters the parameters to this step
+     * @param state      the state created during the call to {@link #createStateAsync(InstrumentationCreateStateParameters)}
+     *
+     * @return a nullable {@link InstrumentationContext} object that will be called back when the step ends (assuming it's not null)
+     */
+    @Nullable
+    default InstrumentationContext<Void> beginReactiveResults(InstrumentationReactiveResultsParameters parameters, InstrumentationState state) {
+        return noOp();
+    }
+
+    /**
      * This is called each time an {@link graphql.execution.ExecutionStrategy} is invoked, which may be multiple times
      * per query as the engine recursively descends over the query.
      *
@@ -153,12 +169,14 @@ public interface Instrumentation {
      * <p>
      * This is an EXPERIMENTAL instrumentation callback. The method signature will definitely change.
      *
-     * @param state the state created during the call to {@link #createStateAsync(InstrumentationCreateStateParameters)}
+     * @param parameters the parameters to this step
+     * @param state      the state created during the call to {@link #createStateAsync(InstrumentationCreateStateParameters)}
      *
-     * @return a nullable {@link ExecutionStrategyInstrumentationContext} object that will be called back when the step ends (assuming it's not null)
+     * @return a nullable {@link InstrumentationContext} object that will be called back when the step ends (assuming it's not null)
      */
     @ExperimentalApi
-    default InstrumentationContext<Object> beginDeferredField(InstrumentationState state) {
+    @Nullable
+    default InstrumentationContext<Object> beginDeferredField(InstrumentationFieldParameters parameters, InstrumentationState state) {
         return noOp();
     }
 
@@ -223,6 +241,9 @@ public interface Instrumentation {
     @Nullable
     default FieldFetchingInstrumentationContext beginFieldFetching(InstrumentationFieldFetchParameters parameters, InstrumentationState state) {
         InstrumentationContext<Object> ctx = beginFieldFetch(parameters, state);
+        if (ctx == noOp()) {
+            return FieldFetchingInstrumentationContext.NOOP;
+        }
         return FieldFetchingInstrumentationContext.adapter(ctx);
     }
 
@@ -262,7 +283,7 @@ public interface Instrumentation {
      *
      * @return a non-null instrumented ExecutionInput, the default is to return to the same object
      */
-    @NotNull
+    @NonNull
     default ExecutionInput instrumentExecutionInput(ExecutionInput executionInput, InstrumentationExecutionParameters parameters, InstrumentationState state) {
         return executionInput;
     }
@@ -276,7 +297,7 @@ public interface Instrumentation {
      *
      * @return a non-null instrumented DocumentAndVariables, the default is to return to the same objects
      */
-    @NotNull
+    @NonNull
     default DocumentAndVariables instrumentDocumentAndVariables(DocumentAndVariables documentAndVariables, InstrumentationExecutionParameters parameters, InstrumentationState state) {
         return documentAndVariables;
     }
@@ -291,7 +312,7 @@ public interface Instrumentation {
      *
      * @return a non-null instrumented GraphQLSchema, the default is to return to the same object
      */
-    @NotNull
+    @NonNull
     default GraphQLSchema instrumentSchema(GraphQLSchema schema, InstrumentationExecutionParameters parameters, InstrumentationState state) {
         return schema;
     }
@@ -306,7 +327,7 @@ public interface Instrumentation {
      *
      * @return a non-null instrumented ExecutionContext, the default is to return to the same object
      */
-    @NotNull
+    @NonNull
     default ExecutionContext instrumentExecutionContext(ExecutionContext executionContext, InstrumentationExecutionParameters parameters, InstrumentationState state) {
         return executionContext;
     }
@@ -323,7 +344,7 @@ public interface Instrumentation {
      *
      * @return a non-null instrumented DataFetcher, the default is to return to the same object
      */
-    @NotNull
+    @NonNull
     default DataFetcher<?> instrumentDataFetcher(DataFetcher<?> dataFetcher, InstrumentationFieldFetchParameters parameters, InstrumentationState state) {
         return dataFetcher;
     }
@@ -337,7 +358,7 @@ public interface Instrumentation {
      *
      * @return a new execution result completable future
      */
-    @NotNull
+    @NonNull
     default CompletableFuture<ExecutionResult> instrumentExecutionResult(ExecutionResult executionResult, InstrumentationExecutionParameters parameters, InstrumentationState state) {
         return CompletableFuture.completedFuture(executionResult);
     }

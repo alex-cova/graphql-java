@@ -1,6 +1,7 @@
 package graphql.execution;
 
 
+import com.google.common.collect.Maps;
 import graphql.GraphQLContext;
 import graphql.Internal;
 import graphql.collect.ImmutableKit;
@@ -27,8 +28,8 @@ import graphql.schema.GraphQLSchema;
 import graphql.schema.GraphQLType;
 import graphql.schema.InputValueWithState;
 import graphql.schema.visibility.GraphqlFieldVisibility;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -101,7 +102,7 @@ public class ValuesResolver {
      *
      * @return a map of the normalised values
      */
-    public static Map<String, NormalizedInputValue> getNormalizedVariableValues(
+    public static NormalizedVariables getNormalizedVariableValues(
             GraphQLSchema schema,
             List<VariableDefinition> variableDefinitions,
             RawVariables rawVariables,
@@ -109,7 +110,7 @@ public class ValuesResolver {
             Locale locale
     ) {
         GraphqlFieldVisibility fieldVisibility = schema.getCodeRegistry().getFieldVisibility();
-        Map<String, NormalizedInputValue> result = new LinkedHashMap<>();
+        Map<String, NormalizedInputValue> result = Maps.newLinkedHashMapWithExpectedSize(variableDefinitions.size());
         for (VariableDefinition variableDefinition : variableDefinitions) {
             String variableName = variableDefinition.getName();
             GraphQLType variableType = TypeFromAST.getTypeFromAST(schema, variableDefinition.getType());
@@ -131,9 +132,7 @@ public class ValuesResolver {
                 }
             }
         }
-
-        return result;
-
+        return NormalizedVariables.of(result);
     }
 
 
@@ -198,7 +197,7 @@ public class ValuesResolver {
         return result;
     }
 
-    @NotNull
+    @NonNull
     public static Map<String, Object> getArgumentValues(
             GraphQLCodeRegistry codeRegistry,
             List<GraphQLArgument> argumentTypes,
@@ -225,9 +224,9 @@ public class ValuesResolver {
      * @return a value converted to a literal
      */
     public static Value<?> valueToLiteral(
-            @NotNull GraphqlFieldVisibility fieldVisibility,
-            @NotNull InputValueWithState inputValueWithState,
-            @NotNull GraphQLType type,
+            @NonNull GraphqlFieldVisibility fieldVisibility,
+            @NonNull InputValueWithState inputValueWithState,
+            @NonNull GraphQLType type,
             GraphQLContext graphqlContext,
             Locale locale
     ) {
@@ -241,8 +240,8 @@ public class ValuesResolver {
     }
 
     public static Value<?> valueToLiteral(
-            @NotNull InputValueWithState inputValueWithState,
-            @NotNull GraphQLType type,
+            @NonNull InputValueWithState inputValueWithState,
+            @NonNull GraphQLType type,
             GraphQLContext graphqlContext,
             Locale locale
     ) {
@@ -318,7 +317,7 @@ public class ValuesResolver {
     }
 
 
-    @NotNull
+    @NonNull
     private static Map<String, Object> getArgumentValuesImpl(
             InputInterceptor inputInterceptor,
             GraphqlFieldVisibility fieldVisibility,
@@ -332,7 +331,7 @@ public class ValuesResolver {
             return ImmutableKit.emptyMap();
         }
 
-        Map<String, Object> coercedValues = new LinkedHashMap<>();
+        Map<String, Object> coercedValues = Maps.newLinkedHashMapWithExpectedSize(arguments.size());
         Map<String, Argument> argumentMap = argumentMap(arguments);
         for (GraphQLArgument argumentDefinition : argumentTypes) {
             GraphQLInputType argumentType = argumentDefinition.getType();
@@ -386,7 +385,7 @@ public class ValuesResolver {
     }
 
     private static Map<String, Argument> argumentMap(List<Argument> arguments) {
-        Map<String, Argument> result = new LinkedHashMap<>(arguments.size());
+        Map<String, Argument> result = Maps.newLinkedHashMapWithExpectedSize(arguments.size());
         for (Argument argument : arguments) {
             result.put(argument.getName(), argument);
         }
@@ -465,8 +464,9 @@ public class ValuesResolver {
                                                                 Value value,
                                                                 Map<String, NormalizedInputValue> normalizedVariables) {
         if (value instanceof ArrayValue) {
-            List<Object> result = new ArrayList<>();
-            for (Value valueInArray : ((ArrayValue) value).getValues()) {
+            List<Value> values = ((ArrayValue) value).getValues();
+            List<Object> result = new ArrayList<>(values.size());
+            for (Value valueInArray : values) {
                 Object normalisedValue = literalToNormalizedValue(
                         fieldVisibility,
                         type.getWrappedType(),

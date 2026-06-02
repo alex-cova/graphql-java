@@ -4,6 +4,8 @@ import com.google.common.collect.ImmutableList;
 import graphql.ExecutionResult;
 import graphql.PublicApi;
 import graphql.execution.instrumentation.Instrumentation;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import graphql.execution.instrumentation.InstrumentationContext;
 import graphql.execution.instrumentation.parameters.InstrumentationExecutionStrategyParameters;
 import graphql.introspection.Introspection;
@@ -12,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
+import static graphql.Assert.assertNotNull;
 import static graphql.execution.instrumentation.SimpleInstrumentationContext.nonNullCtx;
 
 /**
@@ -19,6 +22,7 @@ import static graphql.execution.instrumentation.SimpleInstrumentationContext.non
  * See {@link AsyncExecutionStrategy} for a non-serial (parallel) execution of every field.
  */
 @PublicApi
+@NullMarked
 public class AsyncSerialExecutionStrategy extends AbstractAsyncExecutionStrategy {
 
     public AsyncSerialExecutionStrategy() {
@@ -50,10 +54,9 @@ public class AsyncSerialExecutionStrategy extends AbstractAsyncExecutionStrategy
         }
 
         CompletableFuture<List<Object>> resultsFuture = Async.eachSequentially(fieldNames, (fieldName, prevResults) -> {
-            MergedField currentField = fields.getSubField(fieldName);
+            MergedField currentField = assertNotNull(fields.getSubField(fieldName), "currentField must not be null");
             ResultPath fieldPath = parameters.getPath().segment(mkNameForPath(currentField));
-            ExecutionStrategyParameters newParameters = parameters
-                    .transform(builder -> builder.field(currentField).path(fieldPath));
+            ExecutionStrategyParameters newParameters = parameters.transform(currentField, fieldPath);
 
             return resolveSerialField(executionContext, dataLoaderDispatcherStrategy, newParameters);
         });
@@ -66,21 +69,23 @@ public class AsyncSerialExecutionStrategy extends AbstractAsyncExecutionStrategy
         return overallResult;
     }
 
-    private Object resolveSerialField(ExecutionContext executionContext,
+    private @Nullable Object resolveSerialField(ExecutionContext executionContext,
                                       DataLoaderDispatchStrategy dataLoaderDispatcherStrategy,
                                       ExecutionStrategyParameters newParameters) {
         dataLoaderDispatcherStrategy.executionSerialStrategy(executionContext, newParameters);
 
         Object fieldWithInfo = resolveFieldWithInfo(executionContext, newParameters);
+        dataLoaderDispatcherStrategy.finishedFetching(executionContext, newParameters);
         if (fieldWithInfo instanceof CompletableFuture) {
             //noinspection unchecked
             return ((CompletableFuture<FieldValueInfo>) fieldWithInfo).thenCompose(fvi -> {
-                dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesInfo(List.of(fvi));
-                return fvi.getFieldValueFuture();
+                dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesInfo(List.of(fvi), newParameters);
+                CompletableFuture<Object> fieldValueFuture = fvi.getFieldValueFuture();
+                return fieldValueFuture;
             });
         } else {
             FieldValueInfo fvi = (FieldValueInfo) fieldWithInfo;
-            dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesInfo(List.of(fvi));
+            dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesInfo(List.of(fvi), newParameters);
             return fvi.getFieldValueObject();
         }
     }

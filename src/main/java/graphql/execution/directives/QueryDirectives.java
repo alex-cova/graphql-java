@@ -2,15 +2,19 @@ package graphql.execution.directives;
 
 import graphql.GraphQLContext;
 import graphql.PublicApi;
+import org.jspecify.annotations.NullMarked;
 import graphql.execution.CoercedVariables;
 import graphql.execution.MergedField;
+import graphql.execution.NormalizedVariables;
 import graphql.language.Field;
+import graphql.normalized.NormalizedInputValue;
 import graphql.schema.GraphQLDirective;
 import graphql.schema.GraphQLSchema;
 
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * This gives you access to the immediate directives on a {@link graphql.execution.MergedField}.  This does not include directives on parent
@@ -27,6 +31,7 @@ import java.util.Map;
  *
  * @see graphql.execution.MergedField
  */
+@NullMarked
 @PublicApi
 public interface QueryDirectives {
 
@@ -65,6 +70,16 @@ public interface QueryDirectives {
      * @return a map of all directives on each field inside this
      */
     Map<Field, List<QueryAppliedDirective>> getImmediateAppliedDirectivesByField();
+
+    /**
+     * This will return a map of {@link QueryAppliedDirective} to a map of their argument values in {@link NormalizedInputValue} form
+     * <p>
+     * NOTE : This will only be available when {@link graphql.normalized.ExecutableNormalizedOperationFactory} is used
+     * to create the {@link QueryAppliedDirective} information
+     *
+     * @return a map of applied directive to named argument values
+     */
+    Map<QueryAppliedDirective, Map<String, NormalizedInputValue>> getNormalizedInputValueByImmediateAppliedDirectives();
 
     /**
      * This will return a list of the named directives that are immediately on this merged field.
@@ -107,6 +122,8 @@ public interface QueryDirectives {
         Builder field(Field field);
 
         Builder coercedVariables(CoercedVariables coercedVariables);
+
+        Builder normalizedVariables(Supplier<NormalizedVariables> normalizedVariables);
 
         Builder graphQLContext(GraphQLContext graphQLContext);
 

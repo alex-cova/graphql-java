@@ -2,6 +2,7 @@ package graphql.execution.reactive;
 
 import graphql.DuckTyped;
 import graphql.Internal;
+import org.reactivestreams.FlowAdapters;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -10,6 +11,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * This provides support for a DataFetcher to be able to
@@ -26,15 +28,9 @@ public class ReactiveSupport {
             return flowPublisherToCF((Flow.Publisher<?>) fetchedObject);
         }
         if (fetchedObject instanceof Publisher) {
-            return reactivePublisherToCF((Publisher<?>) fetchedObject);
+            return flowPublisherToCF(FlowAdapters.toFlowPublisher((Publisher<?>) fetchedObject));
         }
         return fetchedObject;
-    }
-
-    private static CompletableFuture<Object> reactivePublisherToCF(Publisher<?> publisher) {
-        ReactivePublisherToCompletableFuture<Object> cf = new ReactivePublisherToCompletableFuture<>();
-        publisher.subscribe(cf);
-        return cf;
     }
 
     private static CompletableFuture<Object> flowPublisherToCF(Flow.Publisher<?> publisher) {
@@ -116,39 +112,6 @@ public class ReactiveSupport {
         }
     }
 
-    private static class ReactivePublisherToCompletableFuture<T> extends PublisherToCompletableFuture<T, Subscription> implements Subscriber<T> {
-
-        @Override
-        void doSubscriptionCancel(Subscription subscription) {
-            subscription.cancel();
-        }
-
-        @Override
-        void doSubscriptionRequest(Subscription subscription, long n) {
-            subscription.request(n);
-        }
-
-        @Override
-        public void onSubscribe(Subscription s) {
-            onSubscribeImpl(s);
-        }
-
-        @Override
-        public void onNext(T t) {
-            onNextImpl(t);
-        }
-
-        @Override
-        public void onError(Throwable t) {
-            onErrorImpl(t);
-        }
-
-        @Override
-        public void onComplete() {
-            onCompleteImpl();
-        }
-    }
-
     private static class FlowPublisherToCompletableFuture<T> extends PublisherToCompletableFuture<T, Flow.Subscription> implements Flow.Subscriber<T> {
 
         @Override
@@ -179,6 +142,57 @@ public class ReactiveSupport {
         @Override
         public void onComplete() {
             onCompleteImpl();
+        }
+    }
+
+    /**
+     * Our reactive {@link SingleSubscriberPublisher} supports only a single subscription
+     * so this can be used a delegate to perform a call back when the given Publisher
+     * actually finishes without adding an extra subscription to the delegate Publisher
+     *
+     * @param publisher        the publisher to wrap
+     * @param atTheEndCallback the callback when the {@link Publisher} has finished
+     * @param <T>              for two
+     */
+    public static <T> Publisher<T> whenPublisherFinishes(Publisher<T> publisher, Consumer<? super Throwable> atTheEndCallback) {
+        return new AtTheEndPublisher<>(publisher, atTheEndCallback);
+    }
+
+    static class AtTheEndPublisher<T> implements Publisher<T> {
+
+        private final Publisher<T> delegatePublisher;
+        private final Consumer<? super Throwable> atTheEndCallback;
+
+        public AtTheEndPublisher(Publisher<T> delegatePublisher, Consumer<? super Throwable> atTheEndCallback) {
+            this.delegatePublisher = delegatePublisher;
+            this.atTheEndCallback = atTheEndCallback;
+        }
+
+        @Override
+        public void subscribe(Subscriber<? super T> originalSubscriber) {
+            delegatePublisher.subscribe(new Subscriber<>() {
+                @Override
+                public void onSubscribe(Subscription s) {
+                    originalSubscriber.onSubscribe(s);
+                }
+
+                @Override
+                public void onNext(T t) {
+                    originalSubscriber.onNext(t);
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    originalSubscriber.onError(t);
+                    atTheEndCallback.accept(t);
+                }
+
+                @Override
+                public void onComplete() {
+                    originalSubscriber.onComplete();
+                    atTheEndCallback.accept(null);
+                }
+            });
         }
     }
 }

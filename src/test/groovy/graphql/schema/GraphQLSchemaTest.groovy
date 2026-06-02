@@ -3,6 +3,7 @@ package graphql.schema
 import graphql.AssertException
 import graphql.Directives
 import graphql.ExecutionInput
+import graphql.introspection.Introspection.DirectiveLocation
 import graphql.GraphQL
 import graphql.TestUtil
 import graphql.language.Directive
@@ -148,29 +149,188 @@ class GraphQLSchemaTest extends Specification {
         ((Directive) newSchema.extensionDefinitions.first().getDirectives().first()).name == "pizza"
     }
 
-    def "clear directives works as expected"() {
+    def "all built-in directives are always present"() {
         setup:
         def schemaBuilder = basicSchemaBuilder()
 
-        when: "no additional directives have been specified"
+        when: "a schema is built"
         def schema = schemaBuilder.build()
-        then:
-        schema.directives.size() == 5
-
-        when: "clear directives is called"
-        schema = schemaBuilder.clearDirectives().build()
-        then:
-        schema.directives.size() == 3 // @deprecated and @specifiedBy and @oneOf is ALWAYS added if missing
-
-        when: "clear directives is called with more directives"
-        schema = schemaBuilder.clearDirectives().additionalDirective(Directives.SkipDirective).build()
-        then:
-        schema.directives.size() == 4
+        then: "all 7 built-in directives are present"
+        schema.directives.size() == 7
+        schema.getDirective("include") != null
+        schema.getDirective("skip") != null
+        schema.getDirective("deprecated") != null
+        schema.getDirective("specifiedBy") != null
+        schema.getDirective("oneOf") != null
+        schema.getDirective("defer") != null
+        schema.getDirective("experimental_disableErrorPropagation") != null
 
         when: "the schema is transformed, things are copied"
-        schema = schema.transform({ builder -> builder.additionalDirective(Directives.IncludeDirective) })
+        schema = schema.transform({ builder -> builder })
+        then: "all 7 built-in directives are still present"
+        schema.directives.size() == 7
+
+        when: "clearDirectives is called"
+        schema = basicSchemaBuilder().clearDirectives().build()
+        then: "all 7 built-in directives are still present because ensureBuiltInDirectives re-adds them"
+        schema.directives.size() == 7
+
+        when: "clearDirectives is called and additional directives are added"
+        schema = basicSchemaBuilder().clearDirectives()
+                .additionalDirective(GraphQLDirective.newDirective()
+                        .name("custom")
+                        .validLocations(DirectiveLocation.FIELD)
+                        .build())
+                .build()
+        then: "all 7 built-in directives are present plus the additional one"
+        schema.directives.size() == 8
+        schema.getDirective("custom") != null
+    }
+
+    def "duplicate directive with different instance throws error"() {
+        given:
+        def directive1 = directive("duplicate", DirectiveLocation.FIELD)
+        def directive2 = directive("duplicate", DirectiveLocation.OBJECT)
+
+        when:
+        basicSchemaBuilder()
+                .additionalDirective(directive1)
+                .additionalDirective(directive2)
+
         then:
-        schema.directives.size() == 5
+        def exception = thrown(AssertException)
+        exception.message == "Directive 'duplicate' already exists with a different instance"
+    }
+
+    def "same directive instance can be added multiple times"() {
+        given:
+        def directive = directive("myDir", DirectiveLocation.FIELD)
+
+        when:
+        def schema = basicSchemaBuilder()
+                .additionalDirective(directive)
+                .additionalDirective(directive)
+                .build()
+
+        then:
+        schema.getDirective("myDir") == directive
+        schema.directives.findAll { it.name == "myDir" }.size() == 1
+    }
+
+    def "additionalDirectives accepts collection"() {
+        given:
+        def directive1 = directive("dir1", DirectiveLocation.FIELD)
+        def directive2 = directive("dir2", DirectiveLocation.OBJECT)
+
+        when:
+        def schema = basicSchemaBuilder()
+                .additionalDirectives([directive1, directive2])
+                .build()
+
+        then:
+        schema.getDirective("dir1") == directive1
+        schema.getDirective("dir2") == directive2
+    }
+
+    @SuppressWarnings("deprecation")
+    def "additionalDirectives accepts deprecated set overload"() {
+        given:
+        def directive1 = directive("setDir1", DirectiveLocation.FIELD)
+        def directive2 = directive("setDir2", DirectiveLocation.OBJECT)
+        Set<GraphQLDirective> directives = new LinkedHashSet<>()
+        directives.add(directive1)
+        directives.add(directive2)
+
+        when:
+        def schema = basicSchemaBuilder()
+                .additionalDirectives(directives)
+                .build()
+
+        then:
+        schema.getDirective("setDir1") == directive1
+        schema.getDirective("setDir2") == directive2
+    }
+
+    def "additionalDirectives rejects duplicate directive names in collection"() {
+        given:
+        def directive1 = directive("duplicate", DirectiveLocation.FIELD)
+        def directive2 = directive("duplicate", DirectiveLocation.OBJECT)
+
+        when:
+        basicSchemaBuilder()
+                .additionalDirectives([directive1, directive2])
+
+        then:
+        def exception = thrown(AssertException)
+        exception.message == "Directive 'duplicate' already exists with a different instance"
+    }
+
+    def "clearDirectives supports replacing non-built-in directives in a schema transform"() {
+        given: "a schema with a custom directive"
+        def originalDirective = GraphQLDirective.newDirective()
+                .name("custom")
+                .description("v1")
+                .validLocations(DirectiveLocation.FIELD)
+                .build()
+        def schema = basicSchemaBuilder()
+                .additionalDirective(originalDirective)
+                .build()
+        assert schema.directives.size() == 8
+
+        when: "the schema is transformed to replace the custom directive"
+        def replacementDirective = GraphQLDirective.newDirective()
+                .name("custom")
+                .description("v2")
+                .validLocations(DirectiveLocation.FIELD)
+                .build()
+        def newSchema = schema.transform({ builder ->
+            def nonBuiltIns = schema.getDirectives().findAll { !Directives.isBuiltInDirective(it) }
+                    .collect { it.getName() == "custom" ? replacementDirective : it }
+            builder.clearDirectives()
+                    .additionalDirectives(nonBuiltIns)
+        })
+
+        then: "all 7 built-in directives are still present"
+        newSchema.directives.size() == 8
+        newSchema.getDirective("include") != null
+        newSchema.getDirective("skip") != null
+        newSchema.getDirective("deprecated") != null
+
+        and: "the custom directive has the updated description"
+        newSchema.getDirective("custom").description == "v2"
+    }
+
+    def "clearDirectives then adding directives gives expected ordering"() {
+        given: "a non-standard directive and a customized built-in directive"
+        def nonStandard = GraphQLDirective.newDirective()
+                .name("custom")
+                .validLocations(DirectiveLocation.FIELD)
+                .build()
+        def skipWithCustomDesc = Directives.SkipDirective.transform({ b ->
+            b.description("custom skip description")
+        })
+
+        when: "clearDirectives is called, then the non-standard directive is added, then the customized built-in is added after it"
+        def schema = basicSchemaBuilder()
+                .clearDirectives()
+                .additionalDirective(nonStandard)
+                .additionalDirective(skipWithCustomDesc)
+                .build()
+
+        then: "unoverridden built-ins come first (in BUILT_IN_DIRECTIVES order, skip excluded), then user-supplied in insertion order"
+        def names = schema.directives.collect { it.name }
+        names == ["include", "deprecated", "specifiedBy", "oneOf", "defer",
+                  "experimental_disableErrorPropagation", "custom", "skip"]
+
+        and: "the customized skip directive retains its custom description"
+        schema.getDirective("skip").description == "custom skip description"
+    }
+
+    private static GraphQLDirective directive(String name, DirectiveLocation directiveLocation) {
+        GraphQLDirective.newDirective()
+                .name(name)
+                .validLocations(directiveLocation)
+                .build()
     }
 
     def "clear additional types works as expected"() {
@@ -561,6 +721,118 @@ class GraphQLSchemaTest extends Specification {
         then:
         thrown(AssertException)
 
+    }
+
+    def "additionalTypes can contain any type when building programmatically - not restricted to detached types"() {
+        given: "types that will be directly reachable from Query"
+        def simpleType = newObject()
+                .name("SimpleType")
+                .field(newFieldDefinition()
+                        .name("name")
+                        .type(GraphQLString))
+                .build()
+
+        def simpleInputType = newInputObject()
+                .name("SimpleInput")
+                .field(newInputObjectField()
+                        .name("value")
+                        .type(GraphQLString))
+                .build()
+
+        def simpleInterface = GraphQLInterfaceType.newInterface()
+                .name("SimpleInterface")
+                .field(newFieldDefinition()
+                        .name("id")
+                        .type(GraphQLString))
+                .build()
+
+        def simpleUnion = GraphQLUnionType.newUnionType()
+                .name("SimpleUnion")
+                .possibleType(simpleType)
+                .build()
+
+        def simpleEnum = GraphQLEnumType.newEnum()
+                .name("SimpleEnum")
+                .value("VALUE_A")
+                .value("VALUE_B")
+                .build()
+
+        def simpleScalar = GraphQLScalarType.newScalar()
+                .name("SimpleScalar")
+                .coercing(new Coercing() {
+                    @Override
+                    Object serialize(Object dataFetcherResult) { return dataFetcherResult }
+
+                    @Override
+                    Object parseValue(Object input) { return input }
+
+                    @Override
+                    Object parseLiteral(Object input) { return input }
+                })
+                .build()
+
+        and: "a query type that references all these types directly"
+        def queryType = newObject()
+                .name("Query")
+                .field(newFieldDefinition()
+                        .name("simpleField")
+                        .type(simpleType))
+                .field(newFieldDefinition()
+                        .name("interfaceField")
+                        .type(simpleInterface))
+                .field(newFieldDefinition()
+                        .name("unionField")
+                        .type(simpleUnion))
+                .field(newFieldDefinition()
+                        .name("enumField")
+                        .type(simpleEnum))
+                .field(newFieldDefinition()
+                        .name("scalarField")
+                        .type(simpleScalar))
+                .field(newFieldDefinition()
+                        .name("inputField")
+                        .type(GraphQLString)
+                        .argument(newArgument()
+                                .name("input")
+                                .type(simpleInputType)))
+                .build()
+
+        def codeRegistry = GraphQLCodeRegistry.newCodeRegistry()
+                .typeResolver(simpleInterface, { env -> simpleType })
+                .typeResolver(simpleUnion, { env -> simpleType })
+                .build()
+
+        when: "we add ALL types (including already reachable ones) as additionalTypes"
+        def schema = GraphQLSchema.newSchema()
+                .query(queryType)
+                .codeRegistry(codeRegistry)
+                .additionalType(simpleType)        // already reachable via Query.simpleField
+                .additionalType(simpleInputType)   // already reachable via Query.inputField argument
+                .additionalType(simpleInterface)   // already reachable via Query.interfaceField
+                .additionalType(simpleUnion)       // already reachable via Query.unionField
+                .additionalType(simpleEnum)        // already reachable via Query.enumField
+                .additionalType(simpleScalar)      // already reachable via Query.scalarField
+                .build()
+
+        then: "schema builds successfully - no restriction on what can be in additionalTypes"
+        schema != null
+
+        and: "all types are in the type map (as expected)"
+        schema.getType("SimpleType") == simpleType
+        schema.getType("SimpleInput") == simpleInputType
+        schema.getType("SimpleInterface") == simpleInterface
+        schema.getType("SimpleUnion") == simpleUnion
+        schema.getType("SimpleEnum") == simpleEnum
+        schema.getType("SimpleScalar") == simpleScalar
+
+        and: "additionalTypes contains all types we added - even though they were already reachable"
+        schema.getAdditionalTypes().size() == 6
+        schema.getAdditionalTypes().contains(simpleType)
+        schema.getAdditionalTypes().contains(simpleInputType)
+        schema.getAdditionalTypes().contains(simpleInterface)
+        schema.getAdditionalTypes().contains(simpleUnion)
+        schema.getAdditionalTypes().contains(simpleEnum)
+        schema.getAdditionalTypes().contains(simpleScalar)
     }
 
 }

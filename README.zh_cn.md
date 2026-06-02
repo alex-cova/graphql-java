@@ -5,7 +5,7 @@
 该组件是 [GraphQL 规范](https://github.com/graphql/graphql-spec) 的 Java 实现。
 
 [![Build](https://github.com/graphql-java/graphql-java/actions/workflows/master.yml/badge.svg)](https://github.com/graphql-java/graphql-java/actions/workflows/master.yml)
-[![Latest Release](https://img.shields.io/maven-central/v/com.graphql-java/graphql-java?versionPrefix=20.)](https://maven-badges.herokuapp.com/maven-central/com.graphql-java/graphql-java/)
+[![Latest Release](https://img.shields.io/maven-central/v/com.graphql-java/graphql-java?versionPrefix=24.)](https://maven-badges.herokuapp.com/maven-central/com.graphql-java/graphql-java/)
 [![Latest Snapshot](https://img.shields.io/maven-central/v/com.graphql-java/graphql-java?label=maven-central%20snapshot&versionPrefix=0)](https://maven-badges.herokuapp.com/maven-central/com.graphql-java/graphql-java/)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-green)](https://github.com/graphql-java/graphql-java/blob/master/LICENSE.md)
 
@@ -14,6 +14,8 @@
 入门教程：[Getting started with GraphQL Java and Spring Boot](https://www.graphql-java.com/tutorials/getting-started-with-spring-boot/)
 
 更多细节请参考`graphql-java`官方文档: https://www.graphql-java.com/documentation/getting-started
+
+我们写了一本书: [GraphQL with Java and Spring](https://leanpub.com/graphql-java)
 
 如果您想了解新版本更多的信息和变更日志请参阅[ releases 列表](https://github.com/graphql-java/graphql-java/releases)。
 
@@ -24,9 +26,3 @@
 ### License
 
 Copyright (c) 2015, Andreas Marek and [贡献者们](https://github.com/graphql-java/graphql-java/graphs/contributors)
-
-### 帮助支持
-
-![YourKit](https://www.yourkit.com/images/yklogo.png)
-
-[YourKit](https://www.yourkit.com/) 通过 YourKit Java Profiler 能力对该项目提供了支持。

@@ -3,7 +3,12 @@ package graphql.schema;
 
 import graphql.Assert;
 import graphql.PublicApi;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -17,11 +22,12 @@ import java.util.function.Supplier;
  * <li>If the source is null, return null</li>
  * <li>If the source is a Map, return map.get(propertyName)</li>
  * <li>If a function is provided, it is used</li>
+ * <li>Find a public JavaBean getter method named `getPropertyName()` or `isPropertyName()` using {@link java.lang.invoke.LambdaMetafactory#metafactory(MethodHandles.Lookup, String, MethodType, MethodType, MethodHandle, MethodType)}</li>
+ * <li>Find a public Record like method named `propertyName()`</li>
  * <li>Find a public JavaBean getter method named `getPropertyName()` or `isPropertyName()`</li>
  * <li>Find any getter method named `getPropertyName()` or `isPropertyName()` and call method.setAccessible(true)</li>
  * <li>Find a public field named `propertyName`</li>
  * <li>Find any field named `propertyName` and call field.setAccessible(true)</li>
- * <li>Find a public Record like method named `propertyName()`</li>
  * <li>If this cant find anything, then null is returned</li>
  * </ul>
  * <p>
@@ -31,10 +37,11 @@ import java.util.function.Supplier;
  * @see graphql.schema.DataFetcher
  */
 @PublicApi
+@NullMarked
 public class PropertyDataFetcher<T> implements LightDataFetcher<T> {
 
-    private final String propertyName;
-    private final Function<Object, Object> function;
+    private final @Nullable String propertyName;
+    private final @Nullable Function<Object, Object> function;
 
     /**
      * This constructor will use the property name and examine the {@link DataFetchingEnvironment#getSource()}
@@ -103,23 +110,23 @@ public class PropertyDataFetcher<T> implements LightDataFetcher<T> {
     /**
      * @return the property that this is fetching for
      */
-    public String getPropertyName() {
+    public @Nullable String getPropertyName() {
         return propertyName;
     }
 
     @Override
-    public T get(GraphQLFieldDefinition fieldDefinition, Object source, Supplier<DataFetchingEnvironment> environmentSupplier) throws Exception {
+    public @Nullable T get(GraphQLFieldDefinition fieldDefinition, Object source, Supplier<DataFetchingEnvironment> environmentSupplier) throws Exception {
         return getImpl(source, fieldDefinition.getType(), environmentSupplier);
     }
 
     @Override
-    public T get(DataFetchingEnvironment environment) {
+    public @Nullable T get(DataFetchingEnvironment environment) {
         Object source = environment.getSource();
         return getImpl(source, environment.getFieldType(), () -> environment);
     }
 
     @SuppressWarnings("unchecked")
-    private T getImpl(Object source, GraphQLOutputType fieldDefinition, Supplier<DataFetchingEnvironment> environmentSupplier) {
+    private @Nullable T getImpl(@Nullable Object source, GraphQLOutputType fieldDefinition, Supplier<DataFetchingEnvironment> environmentSupplier) {
         if (source == null) {
             return null;
         }

@@ -13,7 +13,9 @@ import graphql.language.Value;
 import graphql.util.FpKit;
 import graphql.util.TraversalControl;
 import graphql.util.TraverserContext;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -40,6 +42,7 @@ import static graphql.util.FpKit.getByName;
  * See <a href="https://graphql.org/learn/schema/#enumeration-types">https://graphql.org/learn/schema/#enumeration-types</a> for more details
  */
 @PublicApi
+@NullMarked
 public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutputType, GraphQLUnmodifiedType, GraphQLNullableType, GraphQLDirectiveContainer {
 
     private final String name;
@@ -60,7 +63,7 @@ public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutpu
                             EnumTypeDefinition definition,
                             List<EnumTypeExtensionDefinition> extensionDefinitions) {
         assertValidName(name);
-        assertNotNull(directives, () -> "directives cannot be null");
+        assertNotNull(directives, "directives cannot be null");
 
         this.name = name;
         this.description = description;
@@ -132,7 +135,7 @@ public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutpu
         GraphQLEnumValueDefinition enumValueDefinition = valueDefinitionMap.get(input.toString());
         if (enumValueDefinition == null) {
             assertShouldNeverHappen(i18nMsg(locale, "Enum.badName", name, input.toString()));
-        };
+        }
         return EnumValue.newEnumValue(enumValueDefinition.getName()).build();
 
     }
@@ -141,7 +144,7 @@ public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutpu
         return ImmutableList.copyOf(valueDefinitionMap.values());
     }
 
-    public GraphQLEnumValueDefinition getValue(String name) {
+    public @Nullable GraphQLEnumValueDefinition getValue(String name) {
         return valueDefinitionMap.get(name);
     }
 
@@ -150,7 +153,7 @@ public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutpu
                 (fld1, fld2) -> assertShouldNeverHappen("Duplicated definition for field '%s' in type '%s'", fld1.getName(), this.name)));
     }
 
-    private Object getValueByName(@NotNull Object value, GraphQLContext graphQLContext, Locale locale) {
+    private Object getValueByName(Object value, GraphQLContext graphQLContext, Locale locale) {
         GraphQLEnumValueDefinition enumValueDefinition = valueDefinitionMap.get(value.toString());
         if (enumValueDefinition != null) {
             return enumValueDefinition.getValue();
@@ -324,6 +327,7 @@ public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutpu
         return new Builder(existing);
     }
 
+    @NullUnmarked
     public static class Builder extends GraphqlDirectivesContainerTypeBuilder<Builder, Builder> {
 
         private EnumTypeDefinition definition;
@@ -365,7 +369,7 @@ public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutpu
         }
 
         public Builder value(String name, Object value) {
-            assertNotNull(value, () -> "value can't be null");
+            assertNotNull(value, "value can't be null");
             return value(newEnumValueDefinition().name(name)
                     .value(value).build());
         }
@@ -388,7 +392,7 @@ public class GraphQLEnumType implements GraphQLNamedInputType, GraphQLNamedOutpu
         }
 
         public Builder value(GraphQLEnumValueDefinition enumValueDefinition) {
-            assertNotNull(enumValueDefinition, () -> "enumValueDefinition can't be null");
+            assertNotNull(enumValueDefinition, "enumValueDefinition can't be null");
             values.put(enumValueDefinition.getName(), enumValueDefinition);
             return this;
         }

@@ -26,8 +26,8 @@ import graphql.schema.InputValueWithState;
 import graphql.schema.visibility.DefaultGraphqlFieldVisibility;
 import graphql.schema.visibility.GraphqlFieldVisibility;
 import graphql.util.FpKit;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -49,7 +49,6 @@ import static graphql.schema.GraphQLTypeUtil.simplePrint;
 import static graphql.schema.GraphQLTypeUtil.unwrapNonNull;
 import static graphql.schema.GraphQLTypeUtil.unwrapOneAs;
 import static graphql.schema.visibility.DefaultGraphqlFieldVisibility.DEFAULT_FIELD_VISIBILITY;
-import static java.util.stream.Collectors.toList;
 
 /**
  * This class, originally broken out from {@link  ValuesResolver} contains code for the conversion of values
@@ -220,7 +219,7 @@ class ValuesResolverConversion {
             GraphQLScalarType scalarType,
             Object value,
             GraphQLContext graphqlContext,
-            @NotNull Locale locale
+            @NonNull Locale locale
     ) {
         return scalarType.getCoercing().valueToLiteral(value, graphqlContext, locale);
 
@@ -253,20 +252,23 @@ class ValuesResolverConversion {
             Locale locale
     ) {
         GraphQLInputType wrappedType = (GraphQLInputType) listType.getWrappedType();
-        List<?> result = FpKit.toListOrSingletonList(value)
-                .stream()
-                .map(val -> externalValueToLiteral(
-                        fieldVisibility,
-                        val,
-                        wrappedType,
-                        valueMode,
-                        graphqlContext,
-                        locale))
-                .collect(toList());
+        List<Object> valueList = FpKit.toListOrSingletonList(value);
+        ImmutableList.Builder<Object> resultBuilder = ImmutableList.builderWithExpectedSize(valueList.size());
+        for (Object item : valueList) {
+            resultBuilder.add(externalValueToLiteral(
+                    fieldVisibility,
+                    item,
+                    wrappedType,
+                    valueMode,
+                    graphqlContext,
+                    locale));
+        }
+        ImmutableList<?> result = resultBuilder.build();
+
         if (valueMode == NORMALIZED) {
             return result;
         } else {
-            return ArrayValue.newArrayValue().values((List<Value>) result).build();
+            return ArrayValue.newArrayValue().values((ImmutableList<Value>) result).build();
         }
     }
 
@@ -282,7 +284,7 @@ class ValuesResolverConversion {
             GraphQLContext graphqlContext,
             Locale locale
     ) {
-        assertTrue(inputValue instanceof Map, () -> "Expect Map as input");
+        assertTrue(inputValue instanceof Map, "Expect Map as input");
         Map<String, Object> inputMap = (Map<String, Object>) inputValue;
         List<GraphQLInputObjectField> fieldDefinitions = fieldVisibility.getFieldDefinitions(inputObjectType);
 
@@ -599,16 +601,18 @@ class ValuesResolverConversion {
     ) throws CoercingParseValueException, NonNullableValueCoercedAsNullException {
 
         GraphQLInputType wrappedType = (GraphQLInputType) graphQLList.getWrappedType();
-        return FpKit.toListOrSingletonList(value)
-                .stream()
-                .map(val -> externalValueToInternalValueImpl(
-                        inputInterceptor,
-                        fieldVisibility,
-                        wrappedType,
-                        val,
-                        graphqlContext,
-                        locale))
-                .collect(toList());
+        List<Object> listOrSingletonList = FpKit.toListOrSingletonList(value);
+        List<Object> list = FpKit.arrayListSizedTo(listOrSingletonList);
+        for (Object val : listOrSingletonList) {
+            list.add(externalValueToInternalValueImpl(
+                    inputInterceptor,
+                    fieldVisibility,
+                    wrappedType,
+                    val,
+                    graphqlContext,
+                    locale));
+        }
+        return list;
     }
 
     /**
@@ -711,7 +715,7 @@ class ValuesResolverConversion {
             GraphQLScalarType scalarType,
             CoercedVariables coercedVariables,
             GraphQLContext graphqlContext,
-            @NotNull Locale locale
+            @NonNull Locale locale
     ) {
         // the CoercingParseLiteralException exception that could happen here has been validated earlier via ValidationUtil
         return scalarType.getCoercing().parseLiteral(

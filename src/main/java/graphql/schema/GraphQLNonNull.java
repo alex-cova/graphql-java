@@ -40,14 +40,14 @@ public class GraphQLNonNull implements GraphQLType, GraphQLInputType, GraphQLOut
 
 
     public GraphQLNonNull(GraphQLType wrappedType) {
-        assertNotNull(wrappedType, () -> "wrappedType can't be null");
+        assertNotNull(wrappedType, "wrappedType can't be null");
         assertNonNullWrapping(wrappedType);
         this.originalWrappedType = wrappedType;
     }
 
     private void assertNonNullWrapping(GraphQLType wrappedType) {
-        assertTrue(!GraphQLTypeUtil.isNonNull(wrappedType),
-                "A non null type cannot wrap an existing non null type '%s'", GraphQLTypeUtil.simplePrint(wrappedType));
+        assertTrue(!GraphQLTypeUtil.isNonNull(wrappedType), () ->
+                "A non null type cannot wrap an existing non null type");
     }
 
     @Override

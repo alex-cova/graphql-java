@@ -10,6 +10,7 @@ import graphql.execution.instrumentation.parameters.InstrumentationExecutionStra
 import graphql.execution.instrumentation.parameters.InstrumentationFieldCompleteParameters
 import graphql.execution.instrumentation.parameters.InstrumentationFieldFetchParameters
 import graphql.execution.instrumentation.parameters.InstrumentationFieldParameters
+import graphql.execution.instrumentation.parameters.InstrumentationReactiveResultsParameters
 import graphql.execution.instrumentation.parameters.InstrumentationValidationParameters
 import graphql.language.Document
 import graphql.schema.DataFetcher
@@ -62,6 +63,13 @@ class ModernTestingInstrumentation implements Instrumentation {
     }
 
     @Override
+    InstrumentationContext<Void> beginReactiveResults(InstrumentationReactiveResultsParameters parameters, InstrumentationState state) {
+        assert state == instrumentationState
+        def resultType = parameters.resultType.toString().toLowerCase()
+        return new TestingInstrumentContext("reactive-results-$resultType", executionList, throwableList, useOnDispatch)
+    }
+
+    @Override
     ExecuteObjectInstrumentationContext beginExecuteObject(InstrumentationExecutionStrategyParameters parameters, InstrumentationState state) {
         assert state == instrumentationState
         return new TestingExecuteObjectInstrumentationContext("execute-object", executionList, throwableList, useOnDispatch)
@@ -101,6 +109,12 @@ class ModernTestingInstrumentation implements Instrumentation {
     InstrumentationContext<Object> beginFieldListCompletion(InstrumentationFieldCompleteParameters parameters, InstrumentationState state) {
         assert state == instrumentationState
         return new TestingInstrumentContext("complete-list-$parameters.field.name", executionList, throwableList, useOnDispatch)
+    }
+
+    @Override
+    InstrumentationContext<Object> beginDeferredField(InstrumentationFieldParameters parameters, InstrumentationState state) {
+        assert state == instrumentationState
+        return new TestingInstrumentContext("deferred-field-$parameters.field.name", executionList, throwableList, useOnDispatch)
     }
 
     @Override

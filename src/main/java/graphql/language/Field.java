@@ -9,6 +9,9 @@ import graphql.collect.ImmutableKit;
 import graphql.util.Interning;
 import graphql.util.TraversalControl;
 import graphql.util.TraverserContext;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,13 +30,14 @@ import static graphql.collect.ImmutableKit.emptyMap;
  * This might change in the future.
  */
 @PublicApi
+@NullMarked
 public class Field extends AbstractNode<Field> implements Selection<Field>, SelectionSetContainer<Field>, DirectivesContainer<Field>, NamedNode<Field> {
 
     private final String name;
-    private final String alias;
+    private final @Nullable String alias;
     private final ImmutableList<Argument> arguments;
-    private final ImmutableList<Directive> directives;
-    private final SelectionSet selectionSet;
+    private final NodeUtil.DirectivesHolder directives;
+    private final @Nullable SelectionSet selectionSet;
 
     public static final String CHILD_ARGUMENTS = "arguments";
     public static final String CHILD_DIRECTIVES = "directives";
@@ -42,19 +46,19 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
 
     @Internal
     protected Field(String name,
-                    String alias,
+                    @Nullable String alias,
                     List<Argument> arguments,
                     List<Directive> directives,
-                    SelectionSet selectionSet,
-                    SourceLocation sourceLocation,
+                    @Nullable SelectionSet selectionSet,
+                    @Nullable SourceLocation sourceLocation,
                     List<Comment> comments,
                     IgnoredChars ignoredChars,
                     Map<String, String> additionalData) {
         super(sourceLocation, comments, ignoredChars, additionalData);
-        this.name = name == null ? null : Interning.intern(name);
+        this.name = Interning.intern(name);
         this.alias = alias;
         this.arguments = ImmutableList.copyOf(arguments);
-        this.directives = ImmutableList.copyOf(directives);
+        this.directives = NodeUtil.DirectivesHolder.of(directives);
         this.selectionSet = selectionSet;
     }
 
@@ -103,7 +107,7 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
     public List<Node> getChildren() {
         List<Node> result = new ArrayList<>();
         result.addAll(arguments);
-        result.addAll(directives);
+        result.addAll(directives.getDirectives());
         if (selectionSet != null) {
             result.add(selectionSet);
         }
@@ -114,7 +118,7 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
     public NodeChildrenContainer getNamedChildren() {
         return NodeChildrenContainer.newNodeChildrenContainer()
                 .children(CHILD_ARGUMENTS, arguments)
-                .children(CHILD_DIRECTIVES, directives)
+                .children(CHILD_DIRECTIVES, directives.getDirectives())
                 .child(CHILD_SELECTION_SET, selectionSet)
                 .build();
     }
@@ -133,7 +137,7 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
         return name;
     }
 
-    public String getAlias() {
+    public @Nullable String getAlias() {
         return alias;
     }
 
@@ -147,17 +151,32 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
 
     @Override
     public List<Directive> getDirectives() {
-        return directives;
+        return directives.getDirectives();
     }
 
     @Override
-    public SelectionSet getSelectionSet() {
+    public Map<String, List<Directive>> getDirectivesByName() {
+        return directives.getDirectivesByName();
+    }
+
+    @Override
+    public List<Directive> getDirectives(String directiveName) {
+        return directives.getDirectives(directiveName);
+    }
+
+    @Override
+    public boolean hasDirective(String directiveName) {
+        return directives.hasDirective(directiveName);
+    }
+
+    @Override
+    public @Nullable SelectionSet getSelectionSet() {
         return selectionSet;
     }
 
 
     @Override
-    public boolean isEqualTo(Node o) {
+    public boolean isEqualTo(@Nullable Node o) {
         if (this == o) {
             return true;
         }
@@ -174,8 +193,8 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
     public Field deepCopy() {
         return new Field(name,
                 alias,
-                deepCopy(arguments),
-                deepCopy(directives),
+                assertNotNull(deepCopy(arguments)),
+                assertNotNull(deepCopy(directives.getDirectives())),
                 deepCopy(selectionSet),
                 getSourceLocation(),
                 getComments(),
@@ -218,6 +237,7 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
         return builder.build();
     }
 
+    @NullUnmarked
     public static final class Builder implements NodeDirectivesBuilder {
         private SourceLocation sourceLocation;
         private ImmutableList<Comment> comments = emptyList();
@@ -303,7 +323,7 @@ public class Field extends AbstractNode<Field> implements Selection<Field>, Sele
 
 
         public Field build() {
-            return new Field(name, alias, arguments, directives, selectionSet, sourceLocation, comments, ignoredChars, additionalData);
+            return new Field(assertNotNull(name), alias, arguments, directives, selectionSet, sourceLocation, comments, ignoredChars, additionalData);
         }
     }
 }

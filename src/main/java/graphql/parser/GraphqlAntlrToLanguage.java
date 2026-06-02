@@ -67,7 +67,7 @@ import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.TerminalNode;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -142,6 +142,7 @@ public class GraphqlAntlrToLanguage {
         if (ctx.name() != null) {
             operationDefinition.name(ctx.name().getText());
         }
+        operationDefinition.description(newDescription(ctx.description()));
         operationDefinition.variableDefinitions(createVariableDefinitions(ctx.variableDefinitions()));
         operationDefinition.selectionSet(createSelectionSet(ctx.selectionSet()));
         operationDefinition.directives(createDirectives(ctx.directives()));
@@ -178,6 +179,7 @@ public class GraphqlAntlrToLanguage {
     protected VariableDefinition createVariableDefinition(GraphqlParser.VariableDefinitionContext ctx) {
         VariableDefinition.Builder variableDefinition = VariableDefinition.newVariableDefinition();
         addCommonData(variableDefinition, ctx);
+        variableDefinition.description(newDescription(ctx.description()));
         variableDefinition.name(ctx.variable().name().getText());
         if (ctx.defaultValue() != null) {
             Value value = createValue(ctx.defaultValue().value());
@@ -192,6 +194,7 @@ public class GraphqlAntlrToLanguage {
     protected FragmentDefinition createFragmentDefinition(GraphqlParser.FragmentDefinitionContext ctx) {
         FragmentDefinition.Builder fragmentDefinition = FragmentDefinition.newFragmentDefinition();
         addCommonData(fragmentDefinition, ctx);
+        fragmentDefinition.description(newDescription(ctx.description()));
         fragmentDefinition.name(ctx.fragmentName().getText());
         fragmentDefinition.typeCondition(TypeName.newTypeName().name(ctx.typeCondition().typeName().getText()).build());
         fragmentDefinition.directives(createDirectives(ctx.directives()));

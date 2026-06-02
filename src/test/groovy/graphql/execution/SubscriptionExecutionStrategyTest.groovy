@@ -1,5 +1,6 @@
 package graphql.execution
 
+import graphql.AssertException
 import graphql.ErrorType
 import graphql.ExecutionInput
 import graphql.ExecutionResult
@@ -10,8 +11,12 @@ import graphql.TestUtil
 import graphql.TypeMismatchError
 import graphql.execution.instrumentation.InstrumentationState
 import graphql.execution.instrumentation.LegacyTestingInstrumentation
+import graphql.execution.instrumentation.ModernTestingInstrumentation
+import graphql.execution.instrumentation.SimplePerformantInstrumentation
+import graphql.execution.instrumentation.dataloader.DataLoaderDispatchingContextKeys
 import graphql.execution.instrumentation.parameters.InstrumentationExecutionParameters
 import graphql.execution.pubsub.CapturingSubscriber
+import graphql.execution.pubsub.FlowMessagePublisher
 import graphql.execution.pubsub.Message
 import graphql.execution.pubsub.ReactiveStreamsMessagePublisher
 import graphql.execution.pubsub.ReactiveStreamsObjectPublisher
@@ -22,11 +27,17 @@ import graphql.schema.DataFetchingEnvironment
 import graphql.schema.PropertyDataFetcher
 import graphql.schema.idl.RuntimeWiring
 import org.awaitility.Awaitility
+import org.dataloader.BatchLoader
+import org.dataloader.DataLoaderFactory
+import org.dataloader.DataLoaderRegistry
 import org.reactivestreams.Publisher
 import spock.lang.Specification
 import spock.lang.Unroll
 
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring
 
@@ -138,7 +149,7 @@ class SubscriptionExecutionStrategyTest extends Specification {
     def "subscription query sends out a stream of events using the '#why' implementation"() {
 
         given:
-        Publisher<Object> publisher = eventStreamPublisher
+        Object publisher = eventStreamPublisher
 
         DataFetcher newMessageDF = new DataFetcher() {
             @Override
@@ -181,6 +192,7 @@ class SubscriptionExecutionStrategyTest extends Specification {
         why                       | eventStreamPublisher
         'reactive streams stream' | new ReactiveStreamsMessagePublisher(10)
         'rxjava stream'           | new RxJavaMessagePublisher(10)
+        'flow stream'             | new FlowMessagePublisher(10)
 
     }
 
@@ -188,7 +200,7 @@ class SubscriptionExecutionStrategyTest extends Specification {
     def "subscription alias is correctly used in response messages using '#why' implementation"() {
 
         given:
-        Publisher<Object> publisher = eventStreamPublisher
+        Object publisher = eventStreamPublisher
 
         DataFetcher newMessageDF = new DataFetcher() {
             @Override
@@ -227,6 +239,7 @@ class SubscriptionExecutionStrategyTest extends Specification {
         why                       | eventStreamPublisher
         'reactive streams stream' | new ReactiveStreamsMessagePublisher(1)
         'rxjava stream'           | new RxJavaMessagePublisher(1)
+        'flow stream'             | new FlowMessagePublisher(1)
     }
 
 
@@ -238,7 +251,7 @@ class SubscriptionExecutionStrategyTest extends Specification {
         // capability and it costs us little to support it, lets have a test for it.
         //
         given:
-        Publisher<Object> publisher = eventStreamPublisher
+        Object publisher = eventStreamPublisher
 
         DataFetcher newMessageDF = new DataFetcher() {
             @Override
@@ -279,7 +292,7 @@ class SubscriptionExecutionStrategyTest extends Specification {
         why                       | eventStreamPublisher
         'reactive streams stream' | new ReactiveStreamsMessagePublisher(10)
         'rxjava stream'           | new RxJavaMessagePublisher(10)
-
+        'flow stream'             | new FlowMessagePublisher(10)
     }
 
 
@@ -310,6 +323,33 @@ class SubscriptionExecutionStrategyTest extends Specification {
         executionResult != null
         executionResult.data == null
         executionResult.errors.size() == 1
+    }
+
+    def "if you dont return a Publisher we will assert"() {
+
+        DataFetcher newMessageDF = new DataFetcher() {
+            @Override
+            Object get(DataFetchingEnvironment environment) {
+                return "Not a Publisher"
+            }
+        }
+
+        GraphQL graphQL = buildSubscriptionQL(newMessageDF)
+
+        def executionInput = ExecutionInput.newExecutionInput().query("""
+            subscription NewMessages {
+              newMessage(roomId: 123) {
+                sender
+                text
+              }
+            }
+        """).build()
+
+        when:
+        graphQL.execute(executionInput)
+
+        then:
+        thrown(AssertException)
     }
 
     def "subscription query will surface event stream exceptions"() {
@@ -710,6 +750,49 @@ class SubscriptionExecutionStrategyTest extends Specification {
         }
     }
 
+    def "we can cancel the operation and the upstream publisher is told"() {
+        List<Runnable> promises = new CopyOnWriteArrayList<>()
+        RxJavaMessagePublisher publisher = new RxJavaMessagePublisher(10)
+
+        DataFetcher newMessageDF = { env -> return publisher }
+        DataFetcher senderDF = dfThatDoesNotComplete("sender", promises)
+        DataFetcher textDF = PropertyDataFetcher.fetching("text")
+
+        GraphQL graphQL = buildSubscriptionQL(newMessageDF, senderDF, textDF)
+
+        def executionInput = ExecutionInput.newExecutionInput().query("""
+            subscription NewMessages {
+              newMessage(roomId: 123) {
+                sender
+                text
+              }
+            }
+        """).graphQLContext([(SubscriptionExecutionStrategy.KEEP_SUBSCRIPTION_EVENTS_ORDERED): true]).build()
+
+        def executionResult = graphQL.execute(executionInput)
+
+        when:
+        Publisher<ExecutionResult> msgStream = executionResult.getData()
+        def capturingSubscriber = new CapturingSubscriber<ExecutionResult>(1)
+        msgStream.subscribe(capturingSubscriber)
+
+        // now cancel the operation
+        executionInput.cancel()
+
+        // make things over the subscription
+        promises.forEach { it.run() }
+
+
+        then:
+        Awaitility.await().untilTrue(capturingSubscriber.isDone())
+
+        def messages = capturingSubscriber.events
+        messages.size() == 1
+        def error = messages[0].errors[0]
+        assert error.message.contains("Execution has been asked to be cancelled")
+        publisher.counter == 2
+    }
+
     private static DataFetcher<?> dfThatDoesNotComplete(String propertyName, List<Runnable> promises) {
         { env ->
             def df = PropertyDataFetcher.fetching(propertyName)
@@ -721,4 +804,171 @@ class SubscriptionExecutionStrategyTest extends Specification {
         }
     }
 
+
+    @Unroll
+    def "DataLoader works on each subscription event"() {
+        given:
+        def sdl = """
+            type Query {
+                hello: String
+            }
+            
+            type Subscription {
+                newDogs: [Dog]
+            }
+            
+            type Dog {
+                name: String
+            }
+        """
+
+        AtomicInteger batchLoaderCalled = new AtomicInteger(0)
+        BatchLoader batchLoader = { keys ->
+            println "batchLoader called with keys: $keys"
+            batchLoaderCalled.incrementAndGet()
+            assert keys.size() == 2
+            CompletableFuture.completedFuture(["Luna", "Skipper"])
+        }
+        def dataLoader = DataLoaderFactory.newDataLoader("dogsNameLoader", batchLoader)
+        DataLoaderRegistry dataLoaderRegistry = new DataLoaderRegistry()
+        dataLoaderRegistry.register("dogsNameLoader", dataLoader)
+        AtomicReference<ExecutionContext> capturedExecutionContext = new AtomicReference<>()
+        def instrumentation = Spy(SimplePerformantInstrumentation) {
+            instrumentExecutionContext(_, _, _) >> {
+                ExecutionContext executionContext,
+                InstrumentationExecutionParameters parameters,
+                InstrumentationState state ->
+                    capturedExecutionContext.set(executionContext)
+                    executionContext
+            }
+        }
+
+        DataFetcher dogsNameDF = { env ->
+            println "dogsNameDF called"
+            env.getDataLoader("dogsNameLoader").load(env.getSource())
+        }
+        DataFetcher newDogsDF = { env ->
+            println "newDogsDF called"
+            def dogNames = ["Luna", "Skipper"]
+            return new ReactiveStreamsObjectPublisher(3, { int index ->
+                return dogNames.collect { it -> it + "$index" }
+            })
+        }
+
+        def query = '''subscription {
+            newDogs {
+                name
+            }
+        }'''
+        def schema = TestUtil.schema(sdl, [
+                Subscription: [newDogs: newDogsDF],
+                Dog         : [name: dogsNameDF]
+        ])
+        ExecutionInput ei = ExecutionInput.newExecutionInput()
+                .query(query)
+                .dataLoaderRegistry(dataLoaderRegistry)
+                .build()
+        def graphQL = GraphQL.newGraphQL(schema)
+                .instrumentation(instrumentation)
+                .build()
+
+        if (exhaustedStrategy) {
+            ei.getGraphQLContext().put(DataLoaderDispatchingContextKeys.ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, true)
+        }
+
+        when:
+        def executionResult = graphQL.execute(ei)
+        Publisher<ExecutionResult> msgStream = executionResult.getData()
+        def capturingSubscriber = new CapturingSubscriber<ExecutionResult>(3)
+        msgStream.subscribe(capturingSubscriber)
+        Awaitility.await().untilTrue(capturingSubscriber.isDone())
+
+        then:
+        def events = capturingSubscriber.events
+        events.size() == 3
+        batchLoaderCalled.get() == 3 // batchLoader should be called once for each event
+
+        events[0].data == ["newDogs": [[name: "Luna"], [name: "Skipper"]]]
+        events[1].data == ["newDogs": [[name: "Luna"], [name: "Skipper"]]]
+        events[2].data == ["newDogs": [[name: "Luna"], [name: "Skipper"]]]
+        alternativeCallContextMap(capturedExecutionContext.get().dataLoaderDispatcherStrategy).size() == 0
+
+        where:
+        exhaustedStrategy << [false, true]
+    }
+
+    private Map alternativeCallContextMap(DataLoaderDispatchStrategy dataLoaderDispatchStrategy) {
+        def field = dataLoaderDispatchStrategy.class.getDeclaredField("alternativeCallContextMap")
+        field.accessible = true
+        field.get(dataLoaderDispatchStrategy) as Map
+    }
+
+
+    def "can instrument subscription reactive ending"() {
+
+        given:
+        Object publisher = new ReactiveStreamsMessagePublisher(2)
+
+        DataFetcher newMessageDF = new DataFetcher() {
+            @Override
+            Object get(DataFetchingEnvironment environment) {
+                return publisher
+            }
+        }
+
+        def wiringBuilder = buildBaseSubscriptionWiring(
+                PropertyDataFetcher.fetching("sender"), PropertyDataFetcher.fetching("text")
+        )
+        RuntimeWiring runtimeWiring = wiringBuilder
+                .type(newTypeWiring("Subscription").dataFetcher("newMessage", newMessageDF).build())
+                .build()
+
+        def instrumentation = new ModernTestingInstrumentation()
+
+        def graphQL = TestUtil.graphQL(idl, runtimeWiring)
+                .instrumentation(instrumentation)
+                .subscriptionExecutionStrategy(new SubscriptionExecutionStrategy()).build()
+
+        def executionInput = ExecutionInput.newExecutionInput().query("""
+            subscription NewMessages {
+              newMessage(roomId: 123) {
+                sender
+                text
+              }
+            }
+        """).build()
+
+        def executionResult = graphQL.execute(executionInput)
+
+        when:
+        Publisher<ExecutionResult> msgStream = executionResult.getData()
+        def capturingSubscriber = new CapturingSubscriber<ExecutionResult>()
+        msgStream.subscribe(capturingSubscriber)
+
+        then:
+        msgStream instanceof SubscriptionPublisher
+        Awaitility.await().untilTrue(capturingSubscriber.isDone())
+
+        TestUtil.listContainsInOrder(instrumentation.executionList, [
+                "start:execution",
+                "start:parse",
+                "end:parse",
+                "start:validation",
+                "end:validation",
+                "start:execute-operation",
+                "start:execution-strategy",
+                "start:fetch-newMessage",
+                "end:fetch-newMessage",
+                "start:reactive-results-subscription",
+                "end:execution-strategy",
+                "end:execute-operation",
+                "end:execution",
+        ], [
+                // followed by
+                "end:reactive-results-subscription"
+        ])
+
+        // last of all it finishes
+        TestUtil.last(instrumentation.executionList) == "end:reactive-results-subscription"
+    }
 }

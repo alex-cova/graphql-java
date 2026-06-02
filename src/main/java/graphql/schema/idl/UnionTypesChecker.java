@@ -10,15 +10,12 @@ import graphql.language.UnionTypeDefinition;
 import graphql.language.UnionTypeExtensionDefinition;
 import graphql.schema.idl.errors.UnionTypeError;
 
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import static java.lang.String.format;
+import static java.util.Collections.emptyList;
 
 /**
  * UnionType check, details in https://spec.graphql.org/June2018/#sec-Type-System.
@@ -33,37 +30,27 @@ import static java.lang.String.format;
  */
 @Internal
 class UnionTypesChecker {
-    private static final Map<Class<? extends UnionTypeDefinition>, String> TYPE_OF_MAP = new HashMap<>();
-
-    static {
-        TYPE_OF_MAP.put(UnionTypeDefinition.class, "union");
-        TYPE_OF_MAP.put(UnionTypeExtensionDefinition.class, "union extension");
-    }
-
 
     void checkUnionType(List<GraphQLError> errors, TypeDefinitionRegistry typeRegistry) {
         List<UnionTypeDefinition> unionTypes = typeRegistry.getTypes(UnionTypeDefinition.class);
-        List<UnionTypeExtensionDefinition> unionTypeExtensions = typeRegistry.getTypes(UnionTypeExtensionDefinition.class);
 
-        Stream.concat(unionTypes.stream(), unionTypeExtensions.stream())
-                .forEach(type -> checkUnionType(typeRegistry, type, errors));
+        unionTypes.forEach(type -> checkUnionType(typeRegistry, type, errors));
     }
 
     private void checkUnionType(TypeDefinitionRegistry typeRegistry, UnionTypeDefinition unionTypeDefinition, List<GraphQLError> errors) {
         assertTypeName(unionTypeDefinition, errors);
 
         List<Type> memberTypes = unionTypeDefinition.getMemberTypes();
-        if (memberTypes == null || memberTypes.size() == 0) {
+        if (!hasMemberTypes(typeRegistry, unionTypeDefinition)) {
             errors.add(new UnionTypeError(unionTypeDefinition, format("Union type '%s' must include one or more member types.", unionTypeDefinition.getName())));
             return;
         }
 
         Set<String> typeNames = new LinkedHashSet<>();
-        for (Type memberType : memberTypes) {
+        for (Type<?> memberType : memberTypes) {
             String memberTypeName = ((TypeName) memberType).getName();
-            Optional<TypeDefinition> memberTypeDefinition = typeRegistry.getType(memberTypeName);
-
-            if (!memberTypeDefinition.isPresent() || !(memberTypeDefinition.get() instanceof ObjectTypeDefinition)) {
+            TypeDefinition<?> memberTypeDefinition = typeRegistry.getTypeOrNull(memberTypeName);
+            if (!(memberTypeDefinition instanceof ObjectTypeDefinition)) {
                 errors.add(new UnionTypeError(unionTypeDefinition, format("The member types of a Union type must all be Object base types. member type '%s' in Union '%s' is invalid.", ((TypeName) memberType).getName(), unionTypeDefinition.getName())));
                 continue;
             }
@@ -74,6 +61,16 @@ class UnionTypesChecker {
             }
             typeNames.add(memberTypeName);
         }
+    }
+
+    private boolean hasMemberTypes(TypeDefinitionRegistry typeRegistry, UnionTypeDefinition unionTypeDefinition) {
+        if (!unionTypeDefinition.getMemberTypes().isEmpty()) {
+            return true;
+        }
+
+        List<UnionTypeExtensionDefinition> extensions = typeRegistry.unionTypeExtensions()
+                .getOrDefault(unionTypeDefinition.getName(), emptyList());
+        return extensions.stream().anyMatch(extension -> !extension.getMemberTypes().isEmpty());
     }
 
     private void assertTypeName(UnionTypeDefinition unionTypeDefinition, List<GraphQLError> errors) {

@@ -16,10 +16,10 @@ import org.awaitility.Awaitility
 import org.dataloader.BatchLoader
 import org.dataloader.DataLoaderFactory
 import org.dataloader.DataLoaderRegistry
-import org.jetbrains.annotations.NotNull
 import org.reactivestreams.Publisher
 import reactor.core.publisher.Mono
 import spock.lang.Specification
+import spock.lang.Unroll
 
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
@@ -27,6 +27,8 @@ import java.util.concurrent.CompletionStage
 
 import static graphql.ExecutionInput.newExecutionInput
 import static graphql.StarWarsSchema.starWarsSchema
+import static graphql.execution.instrumentation.dataloader.DataLoaderDispatchingContextKeys.ENABLE_DATA_LOADER_CHAINING
+import static graphql.execution.instrumentation.dataloader.DataLoaderDispatchingContextKeys.ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING
 import static graphql.schema.idl.RuntimeWiring.newRuntimeWiring
 import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring
 
@@ -57,17 +59,10 @@ class DataLoaderDispatcherTest extends Specification {
     ]
 
 
-
-
-    def "dispatch is called if there are data loaders"() {
+    @Unroll
+    def "basic dataloader dispatch test"() {
         def dispatchedCalled = false
-        def dataLoaderRegistry = new DataLoaderRegistry() {
-            @Override
-            void dispatchAll() {
-                dispatchedCalled = true
-                super.dispatchAll()
-            }
-        }
+        def dataLoaderRegistry = new DataLoaderRegistry()
         def dataLoader = DataLoaderFactory.newDataLoader(new BatchLoader() {
             @Override
             CompletionStage<List> load(List keys) {
@@ -78,12 +73,17 @@ class DataLoaderDispatcherTest extends Specification {
 
         def graphQL = GraphQL.newGraphQL(starWarsSchema).build()
         def executionInput = newExecutionInput().dataLoaderRegistry(dataLoaderRegistry).query('{ hero { name } }').build()
+        executionInput.getGraphQLContext().putAll(contextKey == null ? Collections.emptyMap() : [(contextKey): true])
 
         when:
-        def er = graphQL.execute(executionInput)
+        def er = graphQL.executeAsync(executionInput)
+        Awaitility.await().until { er.isDone() }
         then:
-        er.errors.isEmpty()
-        dispatchedCalled
+        er.get().data == [hero: [name: 'R2-D2']]
+
+        where:
+        contextKey << [ENABLE_DATA_LOADER_CHAINING, ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, null]
+
     }
 
     def "enhanced execution input is respected"() {
@@ -96,7 +96,6 @@ class DataLoaderDispatcherTest extends Specification {
 
         def enhancingInstrumentation = new SimplePerformantInstrumentation() {
 
-            @NotNull
             @Override
             ExecutionInput instrumentExecutionInput(ExecutionInput executionInput, InstrumentationExecutionParameters parameters, InstrumentationState state) {
                 assert executionInput.getDataLoaderRegistry() == startingDataLoaderRegistry
@@ -120,6 +119,7 @@ class DataLoaderDispatcherTest extends Specification {
     }
 
 
+    @Unroll
     def "ensure DataLoaderDispatcher works for async serial execution strategy"() {
 
         given:
@@ -134,7 +134,10 @@ class DataLoaderDispatcherTest extends Specification {
 
         when:
 
-        def asyncResult = graphql.executeAsync(newExecutionInput().query(query).dataLoaderRegistry(dlRegistry))
+        def asyncResult = graphql.executeAsync(newExecutionInput().query(query)
+                .graphQLContext(contextKey == null ? Collections.emptyMap() : [(contextKey): true])
+                .dataLoaderRegistry(dlRegistry))
+
 
         Awaitility.await().atMost(Duration.ofMillis(200)).until { -> asyncResult.isDone() }
         def er = asyncResult.join()
@@ -142,8 +145,12 @@ class DataLoaderDispatcherTest extends Specification {
         then:
         er.data == expectedQueryData
 
+        where:
+        contextKey << [ENABLE_DATA_LOADER_CHAINING, ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, null]
+
     }
 
+    @Unroll
     def "basic batch loading is possible"() {
 
         given:
@@ -154,7 +161,9 @@ class DataLoaderDispatcherTest extends Specification {
 
         when:
 
-        def asyncResult = graphql.executeAsync(newExecutionInput().query(query).dataLoaderRegistry(dlRegistry))
+        def asyncResult = graphql.executeAsync(newExecutionInput().query(query)
+                .graphQLContext(contextKey == null ? Collections.emptyMap() : [(contextKey): true])
+                .dataLoaderRegistry(dlRegistry))
 
         def er = asyncResult.join()
 
@@ -178,9 +187,14 @@ class DataLoaderDispatcherTest extends Specification {
         //
         // if we didn't have batch loading it would have these many character load calls
         starWarsWiring.naiveLoadCount == 15
+
+        where:
+        contextKey << [ENABLE_DATA_LOADER_CHAINING, ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, null]
+
     }
 
 
+    @Unroll
     def "non list queries work as expected"() {
 
         given:
@@ -209,7 +223,9 @@ class DataLoaderDispatcherTest extends Specification {
         }
         """
 
-        def asyncResult = graphql.executeAsync(newExecutionInput().query(query).dataLoaderRegistry(dlRegistry))
+        def asyncResult = graphql.executeAsync(newExecutionInput().query(query)
+                .graphQLContext(contextKey == null ? Collections.emptyMap() : [(contextKey): true])
+                .dataLoaderRegistry(dlRegistry))
 
         def er = asyncResult.join()
 
@@ -221,8 +237,13 @@ class DataLoaderDispatcherTest extends Specification {
         starWarsWiring.rawCharacterLoadCount == 4
         starWarsWiring.batchFunctionLoadCount == 2
         starWarsWiring.naiveLoadCount == 8
+
+        where:
+        contextKey << [ENABLE_DATA_LOADER_CHAINING, ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, null]
+
     }
 
+    @Unroll
     def "can be efficient with lazily computed data loaders"() {
 
         def sdl = '''
@@ -233,11 +254,10 @@ class DataLoaderDispatcherTest extends Specification {
 
         BatchLoader batchLoader = { keys -> CompletableFuture.completedFuture(keys) }
 
-        DataFetcher df = { env ->
-            def dataLoader = env.getDataLoaderRegistry().computeIfAbsent("key", { key -> DataLoaderFactory.newDataLoader(batchLoader) })
-
+        def df = { env ->
+            def dataLoader = env.getDataLoader("key")
             return dataLoader.load("working as expected")
-        }
+        } as DataFetcher
         def runtimeWiring = newRuntimeWiring().type(
                 newTypeWiring("Query").dataFetcher("field", df).build()
         ).build()
@@ -245,31 +265,37 @@ class DataLoaderDispatcherTest extends Specification {
         def graphql = TestUtil.graphQL(sdl, runtimeWiring).build()
 
         DataLoaderRegistry dataLoaderRegistry = new DataLoaderRegistry()
+        def loader = DataLoaderFactory.newDataLoader("key", batchLoader)
+        dataLoaderRegistry.register("key", loader)
 
         when:
         def executionInput = newExecutionInput().dataLoaderRegistry(dataLoaderRegistry).query('{ field }').build()
-        def er = graphql.execute(executionInput)
+        executionInput.getGraphQLContext().putAll(contextKey == null ? Collections.emptyMap() : [(contextKey): true]);
+        def erCF = graphql.executeAsync(executionInput)
 
         then:
-        er.errors.isEmpty()
-        er.data["field"] == "working as expected"
+        Awaitility.await().until { erCF.isDone() }
+        erCF.get().errors.isEmpty()
+        erCF.get().data["field"] == "working as expected"
+
+        where:
+        contextKey << [ENABLE_DATA_LOADER_CHAINING, ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, null]
     }
 
+    @Unroll
     def "handles deep async queries when a data loader registry is present"() {
         given:
         def support = new DeepDataFetchers()
         def dummyDataloaderRegistry = new DataLoaderRegistry()
         def graphql = GraphQL.newGraphQL(support.schema())
                 .build()
-        // FieldLevelTrackingApproach uses LevelMaps with a default size of 16.
-        // Use a value greater than 16 to ensure that the underlying LevelMaps are resized
-        // as expected
         def depth = 50
 
         when:
         def asyncResult = graphql.executeAsync(
                 newExecutionInput()
                         .query(support.buildQuery(depth))
+                        .graphQLContext(contextKey == null ? Collections.emptyMap() : [(contextKey): true])
                         .dataLoaderRegistry(dummyDataloaderRegistry)
         )
         def er = asyncResult.join()
@@ -277,8 +303,13 @@ class DataLoaderDispatcherTest extends Specification {
         then:
         er.errors.isEmpty()
         er.data == support.buildResponse(depth)
+
+        where:
+        contextKey << [ENABLE_DATA_LOADER_CHAINING, ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, null]
+
     }
 
+    @Unroll
     def "issue 3662 - dataloader dispatching can work with subscriptions"() {
 
         def sdl = '''
@@ -305,7 +336,7 @@ class DataLoaderDispatcherTest extends Specification {
         }
 
         DataFetcher dlDF = { DataFetchingEnvironment env ->
-            def dataLoader = env.getDataLoaderRegistry().getDataLoader("dl")
+            def dataLoader = env.getDataLoader("dl")
             return dataLoader.load("working as expected")
         }
         DataFetcher dlSub = { DataFetchingEnvironment env ->
@@ -339,6 +370,7 @@ class DataLoaderDispatcherTest extends Specification {
         def executionInput = newExecutionInput()
                 .dataLoaderRegistry(dataLoaderRegistry)
                 .query(query)
+                .graphQLContext(contextKey == null ? Collections.emptyMap() : [(contextKey): true])
                 .build()
         def er = graphql.execute(executionInput)
 
@@ -354,5 +386,8 @@ class DataLoaderDispatcherTest extends Specification {
 
         def msgER = subscriber.getEvents()[0] as ExecutionResult
         msgER.data == [onSub: [x: "working as expected", y: "working as expected"]]
+
+        where:
+        contextKey << [ENABLE_DATA_LOADER_CHAINING, ENABLE_DATA_LOADER_EXHAUSTED_DISPATCHING, null]
     }
 }

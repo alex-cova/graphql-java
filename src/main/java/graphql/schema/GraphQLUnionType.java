@@ -17,6 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
+
 import static graphql.Assert.assertNotEmpty;
 import static graphql.Assert.assertNotNull;
 import static graphql.Assert.assertValidName;
@@ -35,6 +39,7 @@ import static graphql.util.FpKit.getByName;
  * See <a href="https://graphql.org/learn/schema/#union-types">https://graphql.org/learn/schema/#union-types</a> for more details on the concept.
  */
 @PublicApi
+@NullMarked
 public class GraphQLUnionType implements GraphQLNamedOutputType, GraphQLCompositeType, GraphQLUnmodifiedType, GraphQLNullableType, GraphQLDirectiveContainer {
 
     private final String name;
@@ -45,7 +50,7 @@ public class GraphQLUnionType implements GraphQLNamedOutputType, GraphQLComposit
     private final ImmutableList<UnionTypeExtensionDefinition> extensionDefinitions;
     private final DirectivesUtil.DirectivesHolder directives;
 
-    private ImmutableList<GraphQLNamedOutputType> replacedTypes;
+    private @Nullable ImmutableList<GraphQLNamedOutputType> replacedTypes;
 
     public static final String CHILD_TYPES = "types";
 
@@ -59,9 +64,9 @@ public class GraphQLUnionType implements GraphQLNamedOutputType, GraphQLComposit
                              UnionTypeDefinition definition,
                              List<UnionTypeExtensionDefinition> extensionDefinitions) {
         assertValidName(name);
-        assertNotNull(types, () -> "types can't be null");
-        assertNotEmpty(types, () -> "A Union type must define one or more member types.");
-        assertNotNull(directives, () -> "directives cannot be null");
+        assertNotNull(types, "types can't be null");
+        assertNotEmpty(types, "A Union type must define one or more member types.");
+        assertNotNull(directives, "directives cannot be null");
 
         this.name = name;
         this.description = description;
@@ -96,7 +101,12 @@ public class GraphQLUnionType implements GraphQLNamedOutputType, GraphQLComposit
      * @return true if the object type is a member of this union type.
      */
     public boolean isPossibleType(GraphQLObjectType graphQLObjectType) {
-        return getTypes().stream().anyMatch(nt -> nt.getName().equals(graphQLObjectType.getName()));
+        for (GraphQLNamedOutputType type : getTypes()) {
+            if (type.getName().equals(graphQLObjectType.getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // to be removed in a future version when all code is in the code registry
@@ -244,6 +254,7 @@ public class GraphQLUnionType implements GraphQLNamedOutputType, GraphQLComposit
     }
 
     @PublicApi
+    @NullUnmarked
     public static class Builder extends GraphqlDirectivesContainerTypeBuilder<Builder, Builder> {
         private TypeResolver typeResolver;
         private UnionTypeDefinition definition;
@@ -287,13 +298,13 @@ public class GraphQLUnionType implements GraphQLNamedOutputType, GraphQLComposit
         }
 
         public Builder possibleType(GraphQLObjectType type) {
-            assertNotNull(type, () -> "possible type can't be null");
+            assertNotNull(type, "possible type can't be null");
             types.put(type.getName(), type);
             return this;
         }
 
         public Builder possibleType(GraphQLTypeReference reference) {
-            assertNotNull(reference, () -> "reference can't be null");
+            assertNotNull(reference, "reference can't be null");
             types.put(reference.getName(), reference);
             return this;
         }

@@ -2,8 +2,10 @@ package graphql.execution;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import graphql.Assert;
 import graphql.PublicApi;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -11,6 +13,7 @@ import java.util.Set;
 
 
 @PublicApi
+@NullMarked
 public class MergedSelectionSet {
 
     private final Map<String, MergedField> subFields;
@@ -37,7 +40,7 @@ public class MergedSelectionSet {
         return subFields.keySet();
     }
 
-    public MergedField getSubField(String key) {
+    public @Nullable MergedField getSubField(String key) {
         return subFields.get(key);
     }
 
@@ -53,6 +56,7 @@ public class MergedSelectionSet {
         return new Builder();
     }
 
+    @NullUnmarked
     public static class Builder {
 
         private Map<String, MergedField> subFields;

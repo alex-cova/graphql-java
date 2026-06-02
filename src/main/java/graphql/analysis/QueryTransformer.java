@@ -13,6 +13,8 @@ import graphql.util.TreeTransformer;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
 
 import static graphql.Assert.assertNotNull;
 import static graphql.language.AstNodeAdapter.AST_NODE_ADAPTER;
@@ -30,6 +32,7 @@ import static graphql.language.AstNodeAdapter.AST_NODE_ADAPTER;
  * visitField calls.
  */
 @PublicApi
+@NullMarked
 public class QueryTransformer {
 
     private final Node root;
@@ -46,12 +49,12 @@ public class QueryTransformer {
                              Map<String, FragmentDefinition> fragmentsByName,
                              Map<String, Object> variables,
                              QueryTraversalOptions options) {
-        this.schema = assertNotNull(schema, () -> "schema can't be null");
-        this.variables = assertNotNull(variables, () -> "variables can't be null");
-        this.root = assertNotNull(root, () -> "root can't be null");
+        this.schema = assertNotNull(schema, "schema can't be null");
+        this.variables = assertNotNull(variables, "variables can't be null");
+        this.root = assertNotNull(root, "root can't be null");
         this.rootParentType = assertNotNull(rootParentType);
-        this.fragmentsByName = assertNotNull(fragmentsByName, () -> "fragmentsByName can't be null");
-        this.options = assertNotNull(options, () -> "options can't be null");
+        this.fragmentsByName = assertNotNull(fragmentsByName, "fragmentsByName can't be null");
+        this.options = assertNotNull(options, "options can't be null");
     }
 
     /**
@@ -98,6 +101,7 @@ public class QueryTransformer {
     }
 
     @PublicApi
+    @NullUnmarked
     public static class Builder {
         private GraphQLSchema schema;
         private Map<String, Object> variables;
@@ -175,7 +179,7 @@ public class QueryTransformer {
          * @return this builder
          */
         public Builder options(QueryTraversalOptions options) {
-            this.options = assertNotNull(options, () -> "options can't be null");
+            this.options = assertNotNull(options, "options can't be null");
             return this;
         }
 

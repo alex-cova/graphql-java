@@ -32,7 +32,7 @@ import static java.lang.String.format
 class SchemaTypeCheckerTest extends Specification {
 
     static TypeDefinitionRegistry parseSDL(String spec) {
-        new SchemaParser().parse(spec)
+        new SchemaParser().parse(spec).readOnly()
     }
 
     def resolver = new TypeResolver() {
@@ -139,7 +139,7 @@ class SchemaTypeCheckerTest extends Specification {
         for (String name : resolvingNames) {
             runtimeBuilder.type(TypeRuntimeWiring.newTypeWiring(name).typeResolver(resolver))
         }
-        return new SchemaTypeChecker().checkTypeRegistry(types, runtimeBuilder.build())
+        return new SchemaTypeChecker().checkTypeRegistry(types.readOnly(), runtimeBuilder.build())
     }
 
     def "test missing type in object"() {
@@ -943,7 +943,7 @@ class SchemaTypeCheckerTest extends Specification {
         expect:
 
         !result.isEmpty()
-        result.size() == 4
+        result.size() == 5
     }
 
     def "test that field args are unique"() {
@@ -1179,7 +1179,7 @@ class SchemaTypeCheckerTest extends Specification {
 
         expect:
 
-        result.size() == 3
+        result.size() == 4
         errorContaining(result, "The extension 'NonExistent' type [@n:n] is missing its base underlying type")
         errorContaining(result, "The union member type 'Buzz' is not present when resolving type 'FooBar' [@n:n]")
         errorContaining(result, "The type 'FooBar' [@n:n] has declared an union member with a non unique name 'Foo'")
@@ -1787,6 +1787,52 @@ class SchemaTypeCheckerTest extends Specification {
         errorContaining(result, "Union type 'UnionType' must include one or more member types.")
     }
 
+    def "union type with directive only extension must include one or more member types"() {
+        given:
+        def sdl = """
+            directive @directive on UNION
+
+            type Query { hello: String }
+
+            union UnionType
+
+            extend union UnionType @directive
+        """
+
+        when:
+        def result = check(sdl)
+
+        then:
+        errorContaining(result, "Union type 'UnionType' must include one or more member types.")
+    }
+
+    @Unroll
+    def "union extension must not redefine member types from previous union type: #scenario"() {
+        given:
+        def sdl = """
+            type Query { pet: Pet }
+
+            type Cat {
+                id: ID
+            }
+
+            union Pet $baseMembers
+
+            $extensions
+        """
+
+        when:
+        def result = check(sdl)
+
+        then:
+        errorContaining(result, "The type 'Pet' [@n:n] has declared an union member with a non unique name 'Cat'")
+
+        where:
+        scenario             | baseMembers | extensions
+        "base definition"    | "= Cat"     | "extend union Pet = Cat"
+        "earlier extension"  | ""          | "extend union Pet = Cat\nextend union Pet = Cat"
+    }
+
     def "The member types of a Union type must all be object base types"() {
         given:
         def sdl = """
@@ -1823,5 +1869,121 @@ class SchemaTypeCheckerTest extends Specification {
 
         then:
         errorContaining(result, "member type 'Bar' in Union 'DuplicateBar' is not unique. The member types of a Union type must be unique.")
+    }
+
+    def "how many errors do we get on type extension field redefinition"() {
+        def sdl = """
+
+        type Query {
+            foo : Foo
+        }
+        
+        type Foo {
+            foo : String
+        }
+        
+        extend type Foo {
+           redefinedField : String
+        }
+        
+        extend type Foo {
+           otherField1 : String
+        }
+        
+        extend type Foo {
+           otherField2 : String
+        }
+        
+        extend type Foo {
+           redefinedField : String
+        }
+        
+        extend type Foo {
+           redefinedField : String
+        }
+
+        interface InterfaceType {
+            foo : String
+        }
+        
+        extend interface InterfaceType {
+           redefinedInterfaceField : String
+        }
+        
+        extend interface InterfaceType {
+           otherField1 : String
+        }
+        
+        extend interface InterfaceType {
+           otherField2 : String
+        }
+        
+        extend interface InterfaceType {
+           redefinedInterfaceField : String
+        }
+        
+        extend interface InterfaceType {
+           redefinedInterfaceField : String
+        }
+        
+        input Bar {
+            bar : String
+        }
+        
+        extend input Bar {
+           redefinedInputField : String
+        }
+        
+        extend input Bar {
+           otherField1 : String
+        }
+        
+        extend input Bar {
+           otherField2 : String
+        }
+        
+        extend input Bar {
+           redefinedInputField : String
+        }
+        
+        extend input Bar {
+           redefinedInputField : String
+        }
+
+        enum Baz {
+            baz
+        }
+        
+        extend enum Baz {
+           redefinedEnumValue
+        }
+        
+        extend enum Baz {
+           otherField1
+        }
+        
+        extend enum Baz {
+           otherField2
+        }
+        
+        extend enum Baz {
+           redefinedEnumValue
+        }
+        
+        extend enum Baz {
+           redefinedEnumValue
+        }
+            
+        """
+
+        when:
+        def result = check(sdl)
+
+        then:
+        result.size() == 8
+        errorContaining(result, "'Foo' extension type [@n:n] tried to redefine field 'redefinedField' [@n:n]")
+        errorContaining(result, "'InterfaceType' extension type [@n:n] tried to redefine field 'redefinedInterfaceField' [@n:n]")
+        errorContaining(result, "'Bar' extension type [@n:n] tried to redefine field 'redefinedInputField' [@n:n]")
+        errorContaining(result, "'Baz' extension type [@n:n] tried to redefine enum value 'redefinedEnumValue' [@n:n]")
     }
 }

@@ -6,6 +6,14 @@ import graphql.language.Description;
 import graphql.language.DirectiveDefinition;
 import graphql.language.StringValue;
 import graphql.schema.GraphQLDirective;
+import org.jspecify.annotations.NullMarked;
+
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static graphql.Scalars.GraphQLBoolean;
 import static graphql.Scalars.GraphQLString;
@@ -17,7 +25,10 @@ import static graphql.introspection.Introspection.DirectiveLocation.FRAGMENT_SPR
 import static graphql.introspection.Introspection.DirectiveLocation.INLINE_FRAGMENT;
 import static graphql.introspection.Introspection.DirectiveLocation.INPUT_FIELD_DEFINITION;
 import static graphql.introspection.Introspection.DirectiveLocation.INPUT_OBJECT;
+import static graphql.introspection.Introspection.DirectiveLocation.MUTATION;
+import static graphql.introspection.Introspection.DirectiveLocation.QUERY;
 import static graphql.introspection.Introspection.DirectiveLocation.SCALAR;
+import static graphql.introspection.Introspection.DirectiveLocation.SUBSCRIPTION;
 import static graphql.language.DirectiveLocation.newDirectiveLocation;
 import static graphql.language.InputValueDefinition.newInputValueDefinition;
 import static graphql.language.NonNullType.newNonNullType;
@@ -29,6 +40,7 @@ import static graphql.schema.GraphQLNonNull.nonNull;
  * The directives that are understood by graphql-java
  */
 @PublicApi
+@NullMarked
 public class Directives {
 
     private static final String DEPRECATED = "deprecated";
@@ -37,6 +49,7 @@ public class Directives {
     private static final String SPECIFIED_BY = "specifiedBy";
     private static final String ONE_OF = "oneOf";
     private static final String DEFER = "defer";
+    private static final String EXPERIMENTAL_DISABLE_ERROR_PROPAGATION = "experimental_disableErrorPropagation";
 
     public static final DirectiveDefinition DEPRECATED_DIRECTIVE_DEFINITION;
     public static final DirectiveDefinition INCLUDE_DIRECTIVE_DEFINITION;
@@ -46,6 +59,8 @@ public class Directives {
     public static final DirectiveDefinition ONE_OF_DIRECTIVE_DEFINITION;
     @ExperimentalApi
     public static final DirectiveDefinition DEFER_DIRECTIVE_DEFINITION;
+    @ExperimentalApi
+    public static final DirectiveDefinition EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_DEFINITION;
 
     public static final String BOOLEAN = "Boolean";
     public static final String STRING = "String";
@@ -63,7 +78,7 @@ public class Directives {
                         newInputValueDefinition()
                                 .name("reason")
                                 .description(createDescription("The reason for the deprecation"))
-                                .type(newTypeName().name(STRING).build())
+                                .type(newNonNullType(newTypeName().name(STRING).build()).build())
                                 .defaultValue(StringValue.newStringValue().value(NO_LONGER_SUPPORTED).build())
                                 .build())
                 .build();
@@ -133,6 +148,13 @@ public class Directives {
                                 .type(newTypeName().name(STRING).build())
                                 .build())
                 .build();
+        EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_DEFINITION = DirectiveDefinition.newDirectiveDefinition()
+                .name(EXPERIMENTAL_DISABLE_ERROR_PROPAGATION)
+                .directiveLocation(newDirectiveLocation().name(QUERY.name()).build())
+                .directiveLocation(newDirectiveLocation().name(MUTATION.name()).build())
+                .directiveLocation(newDirectiveLocation().name(SUBSCRIPTION.name()).build())
+                .description(createDescription("This directive allows returning null in non-null positions that have an associated error"))
+                .build();
     }
 
     /**
@@ -197,7 +219,7 @@ public class Directives {
             .description("Marks the field, argument, input field or enum value as deprecated")
             .argument(newArgument()
                     .name("reason")
-                    .type(GraphQLString)
+                    .type(nonNull(GraphQLString))
                     .defaultValueProgrammatic(NO_LONGER_SUPPORTED)
                     .description("The reason for the deprecation"))
             .validLocations(FIELD_DEFINITION, ENUM_VALUE, ARGUMENT_DEFINITION, INPUT_FIELD_DEFINITION)
@@ -226,7 +248,86 @@ public class Directives {
             .definition(ONE_OF_DIRECTIVE_DEFINITION)
             .build();
 
+    @ExperimentalApi
+    public static final GraphQLDirective ExperimentalDisableErrorPropagationDirective = GraphQLDirective.newDirective()
+            .name(EXPERIMENTAL_DISABLE_ERROR_PROPAGATION)
+            .description("This directive disables error propagation when a non nullable field returns null for the given operation.")
+            .validLocations(QUERY, MUTATION, SUBSCRIPTION)
+            .definition(EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_DEFINITION)
+            .build();
+
+    /**
+     * The set of all built-in directives that are always present in a graphql schema.
+     * The iteration order is stable and meaningful.
+     */
+    public static final Set<GraphQLDirective> BUILT_IN_DIRECTIVES;
+
+    /**
+     * A map from directive name to directive for all built-in directives.
+     */
+    public static final Map<String, GraphQLDirective> BUILT_IN_DIRECTIVES_MAP;
+
+    static {
+        LinkedHashSet<GraphQLDirective> directives = new LinkedHashSet<>();
+        directives.add(IncludeDirective);
+        directives.add(SkipDirective);
+        directives.add(DeprecatedDirective);
+        directives.add(SpecifiedByDirective);
+        directives.add(OneOfDirective);
+        directives.add(DeferDirective);
+        directives.add(ExperimentalDisableErrorPropagationDirective);
+        BUILT_IN_DIRECTIVES = Collections.unmodifiableSet(directives);
+
+        LinkedHashMap<String, GraphQLDirective> map = new LinkedHashMap<>();
+        for (GraphQLDirective d : BUILT_IN_DIRECTIVES) {
+            map.put(d.getName(), d);
+        }
+        BUILT_IN_DIRECTIVES_MAP = Collections.unmodifiableMap(map);
+    }
+
+    /**
+     * Returns true if a directive with the provided name is a built-in directive.
+     *
+     * @param directiveName the name of the directive in question
+     *
+     * @return true if the directive is built-in, false otherwise
+     */
+    public static boolean isBuiltInDirective(String directiveName) {
+        return BUILT_IN_DIRECTIVES_MAP.containsKey(directiveName);
+    }
+
+    /**
+     * Returns true if the provided directive is a built-in directive.
+     *
+     * @param directive the directive in question
+     *
+     * @return true if the directive is built-in, false otherwise
+     */
+    public static boolean isBuiltInDirective(GraphQLDirective directive) {
+        return isBuiltInDirective(directive.getName());
+    }
+
     private static Description createDescription(String s) {
         return new Description(s, null, false);
+    }
+
+    private static final AtomicBoolean EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_ENABLED = new AtomicBoolean(true);
+
+    /**
+     * This can be used to get the state the `@experimental_disableErrorPropagation` directive support on a JVM wide basis .
+     * @return true if the `@experimental_disableErrorPropagation` directive will be respected
+     */
+    public static boolean isExperimentalDisableErrorPropagationDirectiveEnabled() {
+        return EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_ENABLED.get();
+    }
+
+    /**
+     * This can be used to disable the `@experimental_disableErrorPropagation` directive support on a JVM wide basis in case your server
+     * implementation does NOT want to act on this directive ever.
+     *
+     * @param flag the desired state of the flag
+     */
+    public static void setExperimentalDisableErrorPropagationEnabled(boolean flag) {
+        EXPERIMENTAL_DISABLE_ERROR_PROPAGATION_DIRECTIVE_ENABLED.set(flag);
     }
 }

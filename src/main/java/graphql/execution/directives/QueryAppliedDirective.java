@@ -7,9 +7,10 @@ import graphql.language.Directive;
 import graphql.schema.GraphQLArgument;
 import graphql.schema.GraphQLDirective;
 import graphql.schema.GraphqlTypeBuilder;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +33,7 @@ import static graphql.util.FpKit.getByName;
  * <p>
  * See <a href="https://graphql.org/learn/queries/#directives">https://graphql.org/learn/queries/#directives</a> for more details on the concept.
  */
+@NullMarked
 @PublicApi
 public class QueryAppliedDirective {
 
@@ -41,13 +43,12 @@ public class QueryAppliedDirective {
 
     private QueryAppliedDirective(String name, Directive definition, Collection<QueryAppliedDirectiveArgument> arguments) {
         assertValidName(name);
-        assertNotNull(arguments, () -> "arguments can't be null");
+        assertNotNull(arguments, "arguments can't be null");
         this.name = name;
         this.arguments = ImmutableList.copyOf(arguments);
         this.definition = definition;
     }
 
-    @NotNull
     public String getName() {
         return name;
     }
@@ -107,6 +108,7 @@ public class QueryAppliedDirective {
         return new Builder(existing);
     }
 
+    @NullUnmarked
     public static class Builder extends GraphqlTypeBuilder<Builder> {
 
         private final Map<String, QueryAppliedDirectiveArgument> arguments = new LinkedHashMap<>();
@@ -122,13 +124,13 @@ public class QueryAppliedDirective {
         }
 
         public Builder argument(QueryAppliedDirectiveArgument argument) {
-            assertNotNull(argument, () -> "argument must not be null");
+            assertNotNull(argument,"argument must not be null");
             arguments.put(argument.getName(), argument);
             return this;
         }
 
         public Builder replaceArguments(List<QueryAppliedDirectiveArgument> arguments) {
-            assertNotNull(arguments, () -> "arguments must not be null");
+            assertNotNull(arguments, "arguments must not be null");
             this.arguments.clear();
             for (QueryAppliedDirectiveArgument argument : arguments) {
                 this.arguments.put(argument.getName(), argument);

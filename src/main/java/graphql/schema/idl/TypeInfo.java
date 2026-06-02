@@ -31,7 +31,7 @@ public class TypeInfo {
     private final Deque<Class<?>> decoration = new ArrayDeque<>();
 
     private TypeInfo(Type type) {
-        this.rawType = assertNotNull(type, () -> "type must not be null");
+        this.rawType = assertNotNull(type, "type must not be null");
         while (!(type instanceof TypeName)) {
             if (type instanceof NonNullType) {
                 decoration.push(NonNullType.class);
@@ -137,6 +137,36 @@ public class TypeInfo {
 
     public Type unwrapOneType() {
         return unwrapOne().getRawType();
+    }
+
+    /**
+     * Gets the {@link TypeName} type name of a [Type], unwrapping any lists or non-null decorations
+     *
+     * @param type the Type
+     *
+     * @return the inner {@link TypeName} for this type
+     */
+    public static TypeName getTypeName(Type<?> type) {
+        while (!(type instanceof TypeName)) {
+            if (type instanceof NonNullType) {
+                type = ((NonNullType) type).getType();
+            }
+            if (type instanceof ListType) {
+                type = ((ListType) type).getType();
+            }
+        }
+        return (TypeName) type;
+    }
+
+    /**
+     * Gets the string type name of a [Type], unwrapping any lists or non-null decorations
+     *
+     * @param type the Type
+     *
+     * @return the inner string name for this type
+     */
+    public static String typeName(Type<?> type) {
+        return getTypeName(type).getName();
     }
 
     @Override

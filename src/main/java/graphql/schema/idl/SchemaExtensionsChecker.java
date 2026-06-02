@@ -30,7 +30,7 @@ public class SchemaExtensionsChecker {
     static Map<String, OperationTypeDefinition> gatherOperationDefs(TypeDefinitionRegistry typeRegistry) {
         List<GraphQLError> noErrors = new ArrayList<>();
         Map<String, OperationTypeDefinition> operationTypeDefinitionMap = gatherOperationDefs(noErrors, typeRegistry.schemaDefinition().orElse(null), typeRegistry.getSchemaExtensionDefinitions());
-        Assert.assertTrue(noErrors.isEmpty(), () -> "If you call this method it MUST have previously been error checked");
+        Assert.assertTrue(noErrors.isEmpty(), "If you call this method it MUST have previously been error checked");
         return operationTypeDefinitionMap;
     }
 
@@ -76,10 +76,10 @@ public class SchemaExtensionsChecker {
 
         // ensure we have a "query" one
         Optional<OperationTypeDefinition> query = operationTypeDefinitions.stream().filter(op -> "query".equals(op.getName())).findFirst();
-        if (!query.isPresent()) {
+        if (query.isEmpty()) {
             // its ok if they have a type named Query
-            Optional<TypeDefinition> queryType = typeRegistry.getType("Query");
-            if (!queryType.isPresent()) {
+            TypeDefinition<?> queryType = typeRegistry.getTypeOrNull("Query");
+            if (queryType == null) {
                 errors.add(new QueryOperationMissingError());
             }
         }
@@ -89,7 +89,7 @@ public class SchemaExtensionsChecker {
     static List<Directive> gatherSchemaDirectives(TypeDefinitionRegistry typeRegistry) {
         List<GraphQLError> noErrors = new ArrayList<>();
         List<Directive> directiveList = gatherSchemaDirectives(typeRegistry, noErrors);
-        Assert.assertTrue(noErrors.isEmpty(), () -> "If you call this method it MUST have previously been error checked");
+        Assert.assertTrue(noErrors.isEmpty(), "If you call this method it MUST have previously been error checked");
         return directiveList;
     }
 
@@ -117,13 +117,13 @@ public class SchemaExtensionsChecker {
     private static Consumer<OperationTypeDefinition> checkOperationTypesAreObjects(TypeDefinitionRegistry typeRegistry, List<GraphQLError> errors) {
         return op -> {
             // make sure it is defined as a ObjectTypeDef
-            Type queryType = op.getTypeName();
-            Optional<TypeDefinition> type = typeRegistry.getType(queryType);
-            type.ifPresent(typeDef -> {
-                if (!(typeDef instanceof ObjectTypeDefinition)) {
+            Type<?> queryType = op.getTypeName();
+            TypeDefinition<?> type = typeRegistry.getTypeOrNull(queryType);
+            if (type != null) {
+                if (!(type instanceof ObjectTypeDefinition)) {
                     errors.add(new OperationTypesMustBeObjects(op));
                 }
-            });
+            }
         };
     }
 

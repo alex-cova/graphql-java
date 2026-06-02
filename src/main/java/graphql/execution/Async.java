@@ -2,8 +2,8 @@ package graphql.execution;
 
 import graphql.Assert;
 import graphql.Internal;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,14 +11,17 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static graphql.Assert.assertTrue;
+import static java.util.stream.Collectors.toList;
 
 @Internal
 @SuppressWarnings("FutureReturnValueIgnored")
@@ -53,6 +56,20 @@ public class Async {
          * @return a CompletableFuture to a List of values
          */
         CompletableFuture<List<T>> await();
+
+        /**
+         * Like {@link #await()} but races against the given cancellation future. If the cancellation future
+         * completes before all the tracked futures complete, the already-completed futures will have their
+         * values harvested and returned as partial results (with {@code null} for incomplete entries)
+         * rather than completing exceptionally.
+         *
+         * <p>If {@code cancellationFuture} is {@code null}, this behaves identically to {@link #await()}.
+         *
+         * @param cancellationFuture a future that, when completed, signals cancellation; may be {@code null}
+         *
+         * @return a CompletableFuture to a List of values (possibly partial on cancellation)
+         */
+        CompletableFuture<List<T>> await(@Nullable CompletableFuture<Void> cancellationFuture);
 
         /**
          * This will return a {@code CompletableFuture<List<T>>} if ANY of the input values are async
@@ -102,6 +119,11 @@ public class Async {
         }
 
         @Override
+        public CompletableFuture<List<T>> await(@Nullable CompletableFuture<Void> cancellationFuture) {
+            return await();
+        }
+
+        @Override
         public Object awaitPolymorphic() {
             Assert.assertTrue(ix == 0, () -> "expected size was " + 0 + " got " + ix);
             return Collections.emptyList();
@@ -142,6 +164,33 @@ public class Async {
                 CompletableFuture<T> cf = (CompletableFuture<T>) value;
                 return cf.thenApply(Collections::singletonList);
             }
+            return materialisedValue();
+        }
+
+        @Override
+        public CompletableFuture<List<T>> await(@Nullable CompletableFuture<Void> cancellationFuture) {
+            commonSizeAssert();
+            if (cancellationFuture == null) {
+                return await();
+            }
+
+            if (value instanceof CompletableFuture) {
+                CompletableFuture<List<T>> overallResult = new CompletableFuture<>();
+                //noinspection unchecked
+                CompletableFuture<T> valueCF = (CompletableFuture<T>) value;
+                CompletableFuture.anyOf(valueCF, cancellationFuture).whenComplete((ignored, exception) -> {
+                    if (exception != null) {
+                        overallResult.completeExceptionally(exception);
+                        return;
+                    }
+                    overallResult.complete(Collections.singletonList(doneOrNull(valueCF)));
+                });
+                return overallResult;
+            }
+            return materialisedValue();
+        }
+
+        private @NonNull CompletableFuture<List<T>> materialisedValue() {
             //noinspection unchecked
             return CompletableFuture.completedFuture(Collections.singletonList((T) value));
         }
@@ -229,8 +278,53 @@ public class Async {
             return overallResult;
         }
 
+        @Override
+        public CompletableFuture<List<T>> await(@Nullable CompletableFuture<Void> cancellationFuture) {
+            commonSizeAssert();
+            if (cfCount == 0) {
+                return CompletableFuture.completedFuture(materialisedList(array));
+            }
+            if (cancellationFuture == null) {
+                return await();
+            }
+
+            CompletableFuture<List<T>> overallResult = new CompletableFuture<>();
+            CompletableFuture<Void> allOf = CompletableFuture.allOf(copyOnlyCFsToArray());
+
+            // Race "all field futures complete" against cancellation. The cancellation future always
+            // completes normally (see ExecutionInput#cancel), so anyOf can only complete exceptionally
+            // when a field future fails - in which case we propagate that failure.
+            CompletableFuture.anyOf(allOf, cancellationFuture).whenComplete((ignored, exception) -> {
+                if (exception != null) {
+                    overallResult.completeExceptionally(exception);
+                    return;
+                }
+                // Either every field future is done (allOf won) or cancellation won the race. In both
+                // cases we harvest whatever has completed; field futures that are not yet done become
+                // null. join() is safe here: if allOf is not done then no field future has failed (a
+                // failure would have completed allOf exceptionally and taken the branch above).
+                overallResult.complete(harvestResults(array));
+            });
+
+            return overallResult;
+        }
+
         @SuppressWarnings("unchecked")
-        @NotNull
+        private List<T> harvestResults(Object[] array) {
+            List<T> results = new ArrayList<>(array.length);
+            for (Object object : array) {
+                if (object instanceof CompletableFuture) {
+                    CompletableFuture<T> cf = (CompletableFuture<T>) object;
+                    results.add(doneOrNull(cf));
+                } else {
+                    results.add((T) object);
+                }
+            }
+            return results;
+        }
+
+        @SuppressWarnings("unchecked")
+        @NonNull
         private CompletableFuture<T>[] copyOnlyCFsToArray() {
             if (cfCount == array.length) {
                 // if it's all CFs - make a type safe copy via C code
@@ -258,20 +352,20 @@ public class Async {
             }
         }
 
-        @NotNull
+        @NonNull
+        @SuppressWarnings("unchecked")
         private List<T> materialisedList(Object[] array) {
-            List<T> results = new ArrayList<>(array.length);
-            for (Object object : array) {
-                //noinspection unchecked
-                results.add((T) object);
-            }
-            return results;
+            return (List<T>) Arrays.asList(array);
         }
 
         private void commonSizeAssert() {
             Assert.assertTrue(ix == array.length, () -> "expected size was " + array.length + " got " + ix);
         }
 
+    }
+
+    private static <T> @Nullable T doneOrNull(CompletableFuture<T> valueCF) {
+        return valueCF.isDone() ? valueCF.join() : null;
     }
 
     @SuppressWarnings("unchecked")
@@ -405,7 +499,27 @@ public class Async {
      *
      * @return the completableFuture if it's not null or one that always resoles to null
      */
-    public static <T> @NotNull CompletableFuture<T> orNullCompletedFuture(@Nullable CompletableFuture<T> completableFuture) {
+    public static <T> @NonNull CompletableFuture<T> orNullCompletedFuture(@Nullable CompletableFuture<T> completableFuture) {
         return completableFuture != null ? completableFuture : CompletableFuture.completedFuture(null);
     }
+
+    public static <T> CompletableFuture<List<T>> allOf(List<CompletableFuture<T>> cfs) {
+        return CompletableFuture.allOf(cfs.toArray(CompletableFuture[]::new))
+                .thenApply(v -> cfs.stream()
+                        .map(CompletableFuture::join)
+                        .collect(toList())
+                );
+    }
+
+    public static <K, V> CompletableFuture<Map<K, V>> allOf(Map<K, CompletableFuture<V>> cfs) {
+        return CompletableFuture.allOf(cfs.values().toArray(CompletableFuture[]::new))
+                .thenApply(v -> cfs.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        task -> task.getValue().join())
+                        )
+                );
+    }
+
 }

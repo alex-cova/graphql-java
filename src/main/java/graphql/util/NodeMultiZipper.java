@@ -62,7 +62,7 @@ public class NodeMultiZipper<T> {
             Map<T, ImmutableList<NodeZipper<T>>> sameParent = zipperWithSameParent(deepestZippers);
 
             List<NodeZipper<T>> newZippers = new ArrayList<>();
-            Map<T, NodeZipper<T>> zipperByNode = FpKit.groupingByUniqueKey(curZippers, NodeZipper::getCurNode);
+            Map<T, NodeZipper<T>> zipperByNode = FpKit.toMapByUniqueKey(curZippers, NodeZipper::getCurNode);
             for (Map.Entry<T, ImmutableList<NodeZipper<T>>> entry : sameParent.entrySet()) {
                 NodeZipper<T> newZipper = moveUp(entry.getKey(), entry.getValue());
                 Optional<NodeZipper<T>> zipperToBeReplaced = Optional.ofNullable(zipperByNode.get(entry.getKey()));
@@ -72,7 +72,7 @@ public class NodeMultiZipper<T> {
             curZippers.removeAll(deepestZippers);
             curZippers.addAll(newZippers);
         }
-        assertTrue(curZippers.size() == 1, () -> "unexpected state: all zippers must share the same root node");
+        assertTrue(curZippers.size() == 1, "unexpected state: all zippers must share the same root node");
         return curZippers.iterator().next().toRoot();
     }
 
@@ -105,7 +105,7 @@ public class NodeMultiZipper<T> {
 
     public NodeMultiZipper<T> withReplacedZipper(NodeZipper<T> oldZipper, NodeZipper<T> newZipper) {
         int index = zippers.indexOf(oldZipper);
-        assertTrue(index >= 0, () -> "oldZipper not found");
+        assertTrue(index >= 0, "oldZipper not found");
         List<NodeZipper<T>> newZippers = new ArrayList<>(zippers);
         newZippers.set(index, newZipper);
         return new NodeMultiZipper<>(commonRoot, newZippers, this.nodeAdapter);
@@ -113,7 +113,7 @@ public class NodeMultiZipper<T> {
 
     public NodeMultiZipper<T> withReplacedZipperForNode(T currentNode, T newNode) {
         int index = FpKit.findIndex(zippers, zipper -> zipper.getCurNode() == currentNode);
-        assertTrue(index >= 0, () -> "No current zipper found for provided node");
+        assertTrue(index >= 0, "No current zipper found for provided node");
         NodeZipper<T> newZipper = zippers.get(index).withNewNode(newNode);
         List<NodeZipper<T>> newZippers = new ArrayList<>(zippers);
         newZippers.set(index, newZipper);
@@ -129,7 +129,7 @@ public class NodeMultiZipper<T> {
     }
 
     private NodeZipper<T> moveUp(T parent, List<NodeZipper<T>> sameParent) {
-        assertNotEmpty(sameParent, () -> "expected at least one zipper");
+        assertNotEmpty(sameParent, "expected at least one zipper");
 
         Map<String, List<T>> childrenMap = new HashMap<>(nodeAdapter.getNamedChildren(parent));
         Map<String, Integer> indexCorrection = new HashMap<>();

@@ -8,7 +8,6 @@ import java.util.Objects;
 
 import static graphql.Assert.assertNotNull;
 import static graphql.Assert.assertTrue;
-import static graphql.Assert.assertTrue;
 import static graphql.Assert.assertValidName;
 import static graphql.language.AstPrinter.printAst;
 
@@ -101,7 +100,7 @@ public class NormalizedInputValue {
 
     private String unwrapOne(String typeName) {
         assertNotNull(typeName);
-        Assert.assertTrue(typeName.trim().length() > 0, () -> "We have an empty type name unwrapped");
+        Assert.assertTrue(!typeName.trim().isEmpty(), "We have an empty type name unwrapped");
         if (typeName.endsWith("!")) {
             return typeName.substring(0, typeName.length() - 1);
         }

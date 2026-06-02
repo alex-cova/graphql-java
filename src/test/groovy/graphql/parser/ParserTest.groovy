@@ -1,11 +1,11 @@
 package graphql.parser
 
-
 import graphql.language.Argument
 import graphql.language.ArrayValue
 import graphql.language.AstComparator
 import graphql.language.AstPrinter
 import graphql.language.BooleanValue
+import graphql.language.DescribedNode
 import graphql.language.Description
 import graphql.language.Directive
 import graphql.language.DirectiveDefinition
@@ -45,8 +45,6 @@ import org.antlr.v4.runtime.ParserRuleContext
 import spock.lang.Issue
 import spock.lang.Specification
 import spock.lang.Unroll
-
-import static graphql.parser.ParserEnvironment.*
 
 class ParserTest extends Specification {
 
@@ -110,6 +108,53 @@ class ParserTest extends Specification {
         Document document = new Parser().parseDocument(input)
         then:
         isEqual(document, expectedResult.build())
+    }
+
+    def "parse executable descriptions"() {
+        given:
+        def input = '''
+            "Fetches a hero"
+            query getHero(
+                "The hero id"
+                $id: ID!
+            ) {
+                hero(id: $id) {
+                    ...heroFields
+                }
+            }
+
+            "Reusable hero fields"
+            fragment heroFields on Hero {
+                name
+            }
+        '''
+
+        when:
+        Document document = new Parser().parseDocument(input)
+        OperationDefinition operationDefinition = document.definitions[0] as OperationDefinition
+        VariableDefinition variableDefinition = operationDefinition.variableDefinitions[0]
+        FragmentDefinition fragmentDefinition = document.definitions[1] as FragmentDefinition
+
+        then:
+        (operationDefinition as DescribedNode).description.content == "Fetches a hero"
+        (variableDefinition as DescribedNode).description.content == "The hero id"
+        (fragmentDefinition as DescribedNode).description.content == "Reusable hero fields"
+    }
+
+    def "description is not allowed on query shorthand"() {
+        given:
+        def input = '''
+            "Shorthand descriptions are not part of the executable grammar"
+            {
+                hero
+            }
+        '''
+
+        when:
+        new Parser().parseDocument(input)
+
+        then:
+        thrown(InvalidSyntaxException)
     }
 
     def "parse mutation"() {
@@ -384,7 +429,7 @@ class ParserTest extends Specification {
                 .build()
 
         when:
-        def parserEnvironment = newParserEnvironment().document(input).parserOptions(parserOptionsWithoutCaptureLineComments).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document(input).parserOptions(parserOptionsWithoutCaptureLineComments).build()
         def document = new Parser().parseDocument(parserEnvironment)
         Field helloField = (document.definitions[0] as OperationDefinition).selectionSet.selections[0] as Field
 
@@ -753,7 +798,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
         when:
         def captureIgnoredCharsTRUE = ParserOptions.newParserOptions().captureIgnoredChars(true).build()
 
-        def parserEnvironment = newParserEnvironment().document(input).parserOptions(captureIgnoredCharsTRUE).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document(input).parserOptions(captureIgnoredCharsTRUE).build()
 
         Document document = new Parser().parseDocument(parserEnvironment)
         def field = (document.definitions[0] as OperationDefinition).selectionSet.selections[0]
@@ -851,7 +896,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
                }
     '''
         when:
-        def parserEnvironment = newParserEnvironment().document(input).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document(input).build()
 
         Document document = Parser.parse(parserEnvironment)
         OperationDefinition operationDefinition = (document.definitions[0] as OperationDefinition)
@@ -965,6 +1010,22 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
     }
 
     @Unroll
+    def 'parse ast field definition #valueLiteral'() {
+        expect:
+        def fieldDefinition = Parser.parseFieldDefinition(valueLiteral)
+        AstPrinter.printAstCompact(fieldDefinition) == valueLiteral
+
+        where:
+        valueLiteral                                              | _
+        'foo: Foo'                                                | _
+        'foo(a:String): Foo'                                      | _
+        'foo(a:String!,b:Int!): Foo'                              | _
+        'foo(a:String! ="defaultValue",b:Int!): Foo'              | _
+        'foo(a:String!,b:Int!): Foo @directive(someValue:String)' | _
+    }
+
+
+    @Unroll
     def 'parse ast literals #valueLiteral'() {
         expect:
         Parser.parseValue(valueLiteral) in expectedValue
@@ -1026,7 +1087,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
         def captureIgnoredCharsTRUE = ParserOptions.newParserOptions().captureIgnoredChars(true).build()
 
         when: "explicitly off"
-        def parserEnvironment = newParserEnvironment().document(s).parserOptions(captureIgnoredCharsFALSE).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document(s).parserOptions(captureIgnoredCharsFALSE).build()
         def doc = new Parser().parseDocument(parserEnvironment)
         def type = doc.getDefinitionsOfType(ObjectTypeDefinition)[0]
         then:
@@ -1042,7 +1103,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
 
         when: "explicitly on"
 
-        parserEnvironment = newParserEnvironment().document(s).parserOptions(captureIgnoredCharsTRUE).build()
+        parserEnvironment = ParserEnvironment.newParserEnvironment().document(s).parserOptions(captureIgnoredCharsTRUE).build()
         doc = new Parser().parseDocument(parserEnvironment)
         type = doc.getDefinitionsOfType(ObjectTypeDefinition)[0]
 
@@ -1143,7 +1204,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
 
         when:
         options = ParserOptions.newParserOptions().captureSourceLocation(false).build()
-        def parserEnvironment = newParserEnvironment().document("{ f }").parserOptions(options).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document("{ f }").parserOptions(options).build()
         document = new Parser().parseDocument(parserEnvironment)
 
         then:
@@ -1154,7 +1215,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
 
     def "escape characters correctly printed when printing AST"() {
         given:
-        def env = newParserEnvironment()
+        def env = ParserEnvironment.newParserEnvironment()
                 .document(src)
                 .parserOptions(
                         ParserOptions.newParserOptions()
@@ -1201,7 +1262,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
 
         when: // Enable redacted parser error messages
         def redactParserErrorMessages = ParserOptions.newParserOptions().redactTokenParserErrorMessages(true).build()
-        def parserEnvironment = newParserEnvironment().document(input).parserOptions(redactParserErrorMessages).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document(input).parserOptions(redactParserErrorMessages).build()
         new Parser().parseDocument(parserEnvironment)
 
         then:
@@ -1225,7 +1286,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
 
         when: // Enable redacted parser error messages
         def redactParserErrorMessages = ParserOptions.newParserOptions().redactTokenParserErrorMessages(true).build()
-        def parserEnvironment = newParserEnvironment().document(input).parserOptions(redactParserErrorMessages).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document(input).parserOptions(redactParserErrorMessages).build()
         new Parser().parseDocument(parserEnvironment)
 
         then:
@@ -1247,7 +1308,7 @@ triple3 : """edge cases \\""" "" " \\"" \\" edge cases"""
 
         when: // Enable redacted parser error messages
         def redactParserErrorMessages = ParserOptions.newParserOptions().redactTokenParserErrorMessages(true).build()
-        def parserEnvironment = newParserEnvironment().document(input).parserOptions(redactParserErrorMessages).build()
+        def parserEnvironment = ParserEnvironment.newParserEnvironment().document(input).parserOptions(redactParserErrorMessages).build()
         new Parser().parseDocument(parserEnvironment)
 
         then:

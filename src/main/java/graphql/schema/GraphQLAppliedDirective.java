@@ -6,6 +6,9 @@ import graphql.PublicApi;
 import graphql.language.Directive;
 import graphql.util.TraversalControl;
 import graphql.util.TraverserContext;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +34,7 @@ import static graphql.util.FpKit.getByName;
  * See <a href="https://graphql.org/learn/queries/#directives">https://graphql.org/learn/queries/#directives</a> for more details on the concept.
  */
 @PublicApi
+@NullMarked
 public class GraphQLAppliedDirective implements GraphQLNamedSchemaElement {
 
     private final String name;
@@ -41,7 +45,7 @@ public class GraphQLAppliedDirective implements GraphQLNamedSchemaElement {
 
     private GraphQLAppliedDirective(String name, Directive definition, List<GraphQLAppliedDirectiveArgument> arguments) {
         assertValidName(name);
-        assertNotNull(arguments, () -> "arguments can't be null");
+        assertNotNull(arguments, "arguments can't be null");
         this.name = name;
         this.arguments = ImmutableList.copyOf(arguments);
         this.definition = definition;
@@ -53,7 +57,7 @@ public class GraphQLAppliedDirective implements GraphQLNamedSchemaElement {
     }
 
     @Override
-    public String getDescription() {
+    public @Nullable String getDescription() {
         return null;
     }
 
@@ -61,7 +65,7 @@ public class GraphQLAppliedDirective implements GraphQLNamedSchemaElement {
         return arguments;
     }
 
-    public GraphQLAppliedDirectiveArgument getArgument(String name) {
+    public @Nullable GraphQLAppliedDirectiveArgument getArgument(String name) {
         for (GraphQLAppliedDirectiveArgument argument : arguments) {
             if (argument.getName().equals(name)) {
                 return argument;
@@ -152,6 +156,7 @@ public class GraphQLAppliedDirective implements GraphQLNamedSchemaElement {
         return new Builder(existing);
     }
 
+    @NullUnmarked
     public static class Builder extends GraphqlTypeBuilder<Builder> {
 
         private final Map<String, GraphQLAppliedDirectiveArgument> arguments = new LinkedHashMap<>();
@@ -167,13 +172,13 @@ public class GraphQLAppliedDirective implements GraphQLNamedSchemaElement {
         }
 
         public Builder argument(GraphQLAppliedDirectiveArgument argument) {
-            assertNotNull(argument, () -> "argument must not be null");
+            assertNotNull(argument, "argument must not be null");
             arguments.put(argument.getName(), argument);
             return this;
         }
 
         public Builder replaceArguments(List<GraphQLAppliedDirectiveArgument> arguments) {
-            assertNotNull(arguments, () -> "arguments must not be null");
+            assertNotNull(arguments, "arguments must not be null");
             this.arguments.clear();
             for (GraphQLAppliedDirectiveArgument argument : arguments) {
                 this.arguments.put(argument.getName(), argument);

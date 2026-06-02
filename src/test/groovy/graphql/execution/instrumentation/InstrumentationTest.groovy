@@ -1,32 +1,37 @@
 package graphql.execution.instrumentation
 
+import graphql.ErrorType
 import graphql.ExecutionInput
 import graphql.ExecutionResult
 import graphql.GraphQL
+import graphql.GraphqlErrorBuilder
+import graphql.GraphqlErrorBuilderTest
 import graphql.StarWarsSchema
+import graphql.TestUtil
 import graphql.execution.AsyncExecutionStrategy
+import graphql.execution.DataFetcherExceptionHandlerResult
+import graphql.execution.DataFetcherResult
 import graphql.execution.instrumentation.parameters.InstrumentationCreateStateParameters
 import graphql.execution.instrumentation.parameters.InstrumentationExecutionParameters
 import graphql.execution.instrumentation.parameters.InstrumentationExecutionStrategyParameters
 import graphql.execution.instrumentation.parameters.InstrumentationFieldFetchParameters
+import graphql.incremental.IncrementalExecutionResult
 import graphql.language.AstPrinter
 import graphql.parser.Parser
 import graphql.schema.DataFetcher
 import graphql.schema.DataFetchingEnvironment
-import graphql.schema.LightDataFetcher
-import graphql.schema.PropertyDataFetcher
 import graphql.schema.SingletonPropertyDataFetcher
 import graphql.schema.StaticDataFetcher
 import org.awaitility.Awaitility
-import org.jetbrains.annotations.NotNull
 import spock.lang.Specification
 
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class InstrumentationTest extends Specification {
-
 
     def 'Instrumentation of simple serial execution'() {
         given:
@@ -154,6 +159,165 @@ class InstrumentationTest extends Specification {
         instrumentation.throwableList[0].getMessage() == "DF BANG!"
     }
 
+    def "field fetch will instrument exceptions correctly - includes exception handling with onExceptionHandled"() {
+
+        given:
+
+        def query = """
+        {
+            hero {
+                id
+            }
+        }
+        """
+
+        def instrumentation = new LegacyTestingInstrumentation() {
+            def onHandledCalled = false
+            def onCompletedCalled = false
+            def onDispatchedCalled = false
+
+            @Override
+            DataFetcher<?> instrumentDataFetcher(DataFetcher<?> dataFetcher, InstrumentationFieldFetchParameters parameters, InstrumentationState state) {
+                return new DataFetcher<Object>() {
+                    @Override
+                    Object get(DataFetchingEnvironment environment) {
+                        throw new RuntimeException("DF BANG!")
+                    }
+                }
+            }
+
+            @Override
+            FieldFetchingInstrumentationContext beginFieldFetching(InstrumentationFieldFetchParameters parameters, InstrumentationState state) {
+                return new FieldFetchingInstrumentationContext() {
+                    @Override
+                    void onDispatched() {
+                        onDispatchedCalled = true
+                    }
+
+                    @Override
+                    void onCompleted(Object result, Throwable t) {
+                        onCompletedCalled = true
+                    }
+
+                    @Override
+                    void onExceptionHandled(DataFetcherResult<Object> dataFetcherResult) {
+                        onHandledCalled = true
+                    }
+                }
+            }
+        }
+
+        def graphQL = GraphQL
+                .newGraphQL(StarWarsSchema.starWarsSchema)
+                .defaultDataFetcherExceptionHandler { it ->
+                    // catch all exceptions and transform to graphql error with a prefixed message
+                    return CompletableFuture.completedFuture(
+                            DataFetcherExceptionHandlerResult.newResult(GraphqlErrorBuilder.newError()
+                                    .errorType(ErrorType.DataFetchingException)
+                                    .message("Handled " + it.exception.message)
+                                    .path(it.path)
+                                    .build())
+                            .build())
+                }
+                .instrumentation(instrumentation)
+                .build()
+
+        when:
+        def resp = graphQL.execute(query)
+
+        then: "exception handler turned the exception into a graphql error and message prefixed with Handled"
+        resp.errors.size() == 1
+        resp.errors[0].message == "Handled DF BANG!"
+
+        and: "all instrumentation methods were called"
+        instrumentation.onDispatchedCalled == true
+        instrumentation.onCompletedCalled == true
+        instrumentation.onHandledCalled == true
+    }
+
+
+    def "field fetch verify order and call of all methods"() {
+
+        given:
+
+        def query = """
+        {
+            hero {
+                id
+            }
+        }
+        """
+
+        def metric = []
+        def instrumentation = new SimplePerformantInstrumentation() {
+            def timeElapsed = new AtomicInteger()
+
+            @Override
+            DataFetcher<?> instrumentDataFetcher(DataFetcher<?> dataFetcher, InstrumentationFieldFetchParameters parameters, InstrumentationState state) {
+                return new DataFetcher<Object>() {
+                    @Override
+                    Object get(DataFetchingEnvironment environment) {
+                        // simulate latency
+                        timeElapsed.addAndGet(50)
+                        throw new RuntimeException("DF BANG!")
+                    }
+                }
+            }
+
+            @Override
+            FieldFetchingInstrumentationContext beginFieldFetching(InstrumentationFieldFetchParameters parameters, InstrumentationState state) {
+                return new FieldFetchingInstrumentationContext() {
+                    def start = 0
+                    def duration = 0
+                    def hasError = false
+
+
+                    @Override
+                    void onDispatched() {
+                        start = 1
+                    }
+
+                    @Override
+                    void onCompleted(Object result, Throwable t) {
+                        duration = timeElapsed.get() - start
+                        metric = [duration, hasError]
+                    }
+
+                    @Override
+                    void onExceptionHandled(DataFetcherResult<Object> dataFetcherResult) {
+                        hasError = dataFetcherResult.errors != null && !dataFetcherResult.errors.isEmpty()
+                            && dataFetcherResult.errors.any { it.message.contains("Handled") }
+                    }
+                }
+            }
+        }
+
+        def graphQL = GraphQL
+                .newGraphQL(StarWarsSchema.starWarsSchema)
+                .defaultDataFetcherExceptionHandler { it ->
+                    // catch all exceptions and transform to graphql error with a prefixed message
+                    return CompletableFuture.completedFuture(
+                            DataFetcherExceptionHandlerResult.newResult(GraphqlErrorBuilder.newError()
+                                    .errorType(ErrorType.DataFetchingException)
+                                    .message("Handled " + it.exception.message)
+                                    .path(it.path)
+                                    .build())
+                            .build())
+                }
+                .instrumentation(instrumentation)
+                .build()
+
+        when:
+        def resp = graphQL.execute(query)
+
+        then: "exception handler turned the exception into a graphql error and prefixed its message with 'Handled'"
+        resp.errors.size() == 1
+        resp.errors[0].message == "Handled DF BANG!"
+
+        and: "metric was captured i.e all instrumentation methods were called in the right order"
+        metric == [49, true]
+    }
+
     /**
      * This uses a stop and go pattern and multiple threads.  Each time
      * the execution strategy is invoked, the data fetchers are held
@@ -185,7 +349,6 @@ class InstrumentationTest extends Specification {
             }
         }
 
-        @NotNull
         @Override
         DataFetcher<?> instrumentDataFetcher(DataFetcher<?> dataFetcher, InstrumentationFieldFetchParameters parameters, InstrumentationState state) {
             System.out.println(String.format("t%s instrument DF for %s", Thread.currentThread().getId(), parameters.environment.getExecutionStepInfo().getPath()))
@@ -343,7 +506,7 @@ class InstrumentationTest extends Specification {
         def instrumentation = new ModernTestingInstrumentation() {
             @Override
             InstrumentationContext<ExecutionResult> beginExecution(InstrumentationExecutionParameters parameters, InstrumentationState state) {
-                executionList.add("start:execution")
+                this.executionList.add("start:execution")
                 return null
             }
         }
@@ -500,4 +663,142 @@ class InstrumentationTest extends Specification {
         then:
         er.extensions == [i1: "I1"]
     }
+
+    def "can instrumented deferred fields"() {
+
+        given:
+
+        def query = """
+        {
+            hero {
+                id
+                ... @defer(label: "name") {
+                    name
+                }
+            }
+        }
+        """
+
+
+        when:
+
+        def instrumentation = new ModernTestingInstrumentation()
+
+        def graphQL = GraphQL
+                .newGraphQL(StarWarsSchema.starWarsSchema)
+                .queryExecutionStrategy(new AsyncExecutionStrategy())
+                .instrumentation(instrumentation)
+                .build()
+
+        def ei = ExecutionInput.newExecutionInput(query).graphQLContext { it ->
+            GraphQL.unusualConfiguration(it).incrementalSupport().enableIncrementalSupport(true)
+        }.build()
+
+        IncrementalExecutionResult incrementalER = graphQL.execute(ei) as IncrementalExecutionResult
+        //
+        // cause the defer Publish to be finished
+        def results = TestUtil.getIncrementalResults(incrementalER)
+
+
+        then:
+
+        instrumentation.executionList == ["start:execution",
+                                          "start:parse",
+                                          "end:parse",
+                                          "start:validation",
+                                          "end:validation",
+                                          "start:execute-operation",
+                                          "start:execution-strategy",
+                                          "start:field-hero",
+                                          "start:fetch-hero",
+                                          "end:fetch-hero",
+                                          "start:complete-hero",
+                                          "start:execute-object",
+                                          "start:field-id",
+                                          "start:fetch-id",
+                                          "end:fetch-id",
+                                          "start:complete-id",
+                                          "end:complete-id",
+                                          "end:field-id",
+
+                                          "end:execute-object",
+                                          "end:complete-hero",
+                                          "end:field-hero",
+                                          "end:execution-strategy",
+                                          "end:execute-operation",
+                                          "start:reactive-results-defer",
+                                          "end:execution",
+                                          //
+                                          // the deferred field resolving now happens after the operation has come back
+                                          "start:deferred-field-name",
+                                          "start:field-name",
+                                          "start:fetch-name",
+                                          "end:fetch-name",
+                                          "start:complete-name",
+                                          "end:complete-name",
+                                          "end:field-name",
+                                          "end:deferred-field-name",
+
+                                          "end:reactive-results-defer",
+        ]
+    }
+
+    def "can instrument defer reactive ending"() {
+
+        given:
+
+        def query = """
+        {
+            hero {
+                id
+                ... @defer(label: "name") {
+                    name
+                }
+            }
+        }
+        """
+
+
+        when:
+
+        def instrumentation = new ModernTestingInstrumentation()
+
+        def graphQL = GraphQL
+                .newGraphQL(StarWarsSchema.starWarsSchema)
+                .queryExecutionStrategy(new AsyncExecutionStrategy())
+                .instrumentation(instrumentation)
+                .build()
+
+        def ei = ExecutionInput.newExecutionInput(query).graphQLContext { it ->
+            GraphQL.unusualConfiguration(it).incrementalSupport().enableIncrementalSupport(true)
+        }.build()
+
+        IncrementalExecutionResult incrementalER = graphQL.execute(ei) as IncrementalExecutionResult
+        //
+        // cause the defer Publish to be finished
+        def results = TestUtil.getIncrementalResults(incrementalER)
+        then:
+
+        TestUtil.listContainsInOrder(instrumentation.executionList, [
+                "start:execution",
+                "start:parse",
+                "end:parse",
+                "start:validation",
+                "end:validation",
+                "start:execute-operation",
+        ], [
+                // then it ends initial operation
+                "end:execution-strategy",
+                "end:execute-operation",
+                "start:reactive-results-defer",
+                "end:execution",
+        ], [
+                // followed by
+                "end:reactive-results-defer"
+        ])
+
+        // last of all it finishes
+        TestUtil.last(instrumentation.executionList) == "end:reactive-results-defer"
+    }
+
 }

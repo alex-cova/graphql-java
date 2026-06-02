@@ -1,5 +1,17 @@
+import aQute.bnd.gradle.BundleTaskExtension
+import net.ltgt.gradle.errorprone.CheckSeverity
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
+
 import java.text.SimpleDateFormat
 
+buildscript {
+    repositories { mavenCentral() }
+    dependencies {
+        classpath 'org.ow2.asm:asm:9.9.1'
+        classpath 'org.ow2.asm:asm-tree:9.9.1'
+    }
+}
 
 plugins {
     id 'java'
@@ -7,16 +19,35 @@ plugins {
     id 'maven-publish'
     id 'antlr'
     id 'signing'
-    id "com.github.johnrengelman.shadow" version "8.1.1"
-    id "biz.aQute.bnd.builder" version "6.4.0"
+    id "com.gradleup.shadow" version "9.4.1"
+    id "biz.aQute.bnd.builder" version "7.1.0"
     id "io.github.gradle-nexus.publish-plugin" version "2.0.0"
     id "groovy"
-    id "me.champeau.jmh" version "0.7.2"
+    id "me.champeau.jmh" version "0.7.3"
+    id "io.github.reyerizo.gradle.jcstress" version "0.9.0"
+    id "net.ltgt.errorprone" version '5.1.0'
+    id 'jacoco'
+    //
+    // Kotlin just for tests - not production code
+    id 'org.jetbrains.kotlin.jvm' version '2.3.20'
 }
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(11)
+        languageVersion = JavaLanguageVersion.of(25) // build on 25 - release on 11
+    }
+}
+
+kotlin {
+    compilerOptions {
+        apiVersion = KotlinVersion.KOTLIN_2_0
+        languageVersion = KotlinVersion.KOTLIN_2_0
+        jvmTarget = JvmTarget.JVM_11
+        javaParameters = true
+        freeCompilerArgs = [
+                '-Xemit-jvm-type-annotations',
+                '-Xjspecify-annotations=strict',
+        ]
     }
 }
 
@@ -57,14 +88,14 @@ def getDevelopmentVersion() {
     def gitRevParseError = new StringBuilder()
     def gitRevParse = ["git", "-C", projectDir.toString(), "rev-parse", "--abbrev-ref", "HEAD"].execute()
     gitRevParse.waitForProcessOutput(gitRevParseOutput, gitRevParseError)
-    def branchName = gitRevParseOutput.toString().trim()
+    def branchName = gitRevParseOutput.toString().trim().replaceAll('[/\\\\]', '-')
 
     return makeDevelopmentVersion(["0.0.0", branchName, "SNAPSHOT"])
 }
 
 def reactiveStreamsVersion = '1.0.3'
 def releaseVersion = System.env.RELEASE_VERSION
-def antlrVersion = '4.11.1' // https://mvnrepository.com/artifact/org.antlr/antlr4-runtime
+def antlrVersion = '4.13.2' // https://mvnrepository.com/artifact/org.antlr/antlr4-runtime
 def guavaVersion = '32.1.2-jre'
 version = releaseVersion ? releaseVersion : getDevelopmentVersion()
 group = 'com.graphql-java'
@@ -99,32 +130,52 @@ jar {
 }
 
 dependencies {
-    compileOnly 'org.jetbrains:annotations:26.0.1'
-    implementation 'org.antlr:antlr4-runtime:' + antlrVersion
-    api 'com.graphql-java:java-dataloader:3.3.0'
+    api 'com.graphql-java:java-dataloader:6.0.0'
     api 'org.reactivestreams:reactive-streams:' + reactiveStreamsVersion
-    antlr 'org.antlr:antlr4:' + antlrVersion
+    api "org.jspecify:jspecify:1.0.0"
+
+    implementation 'org.antlr:antlr4-runtime:' + antlrVersion
     implementation 'com.google.guava:guava:' + guavaVersion
-    testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-    testImplementation 'org.spockframework:spock-core:2.0-groovy-3.0'
-    testImplementation 'org.codehaus.groovy:groovy:3.0.23'
-    testImplementation 'org.codehaus.groovy:groovy-json:3.0.23'
-    testImplementation 'com.google.code.gson:gson:2.11.0'
-    testImplementation 'org.eclipse.jetty:jetty-server:11.0.24'
-    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
-    testImplementation 'org.awaitility:awaitility-groovy:4.2.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.14.3'
+
+    testImplementation 'org.spockframework:spock-core:2.4-groovy-5.0'
+    testImplementation 'net.bytebuddy:byte-buddy:1.18.8'
+    testImplementation 'org.objenesis:objenesis:3.5'
+    testImplementation 'org.apache.groovy:groovy:5.0.5'
+    testImplementation 'org.apache.groovy:groovy-json:5.0.5'
+    testImplementation 'com.google.code.gson:gson:2.14.0'
+    testImplementation 'org.eclipse.jetty:jetty-server:11.0.26'
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.21.1'
+    testImplementation 'org.awaitility:awaitility-groovy:4.3.0'
     testImplementation 'com.github.javafaker:javafaker:1.0.2'
 
     testImplementation 'org.reactivestreams:reactive-streams-tck:' + reactiveStreamsVersion
     testImplementation "io.reactivex.rxjava2:rxjava:2.2.21"
-    testImplementation "io.projectreactor:reactor-core:3.7.0"
+    testImplementation "io.projectreactor:reactor-core:3.8.5"
 
-    testImplementation 'org.testng:testng:7.10.2' // use for reactive streams test inheritance
+    testImplementation 'org.testng:testng:7.12.0' // use for reactive streams test inheritance
+    testImplementation "com.tngtech.archunit:archunit-junit5:1.4.2"
+    testImplementation 'org.openjdk.jmh:jmh-core:1.37' // required for ArchUnit to check JMH tests
+    
+    // JUnit Platform launcher required for Gradle 9
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.14.3'
 
-    testImplementation 'org.openjdk.jmh:jmh-core:1.37'
-    testAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+    antlr 'org.antlr:antlr4:' + antlrVersion
+
+    // this is needed for the idea jmh plugin to work correctly
     jmh 'org.openjdk.jmh:jmh-core:1.37'
     jmh 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+    jmh 'me.bechberger:ap-loader-all:4.4-13'
+
+    // comment this in if you want to run JMH benchmarks from idea
+//    jmhAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+
+    errorprone 'com.uber.nullaway:nullaway:0.13.4'
+    errorprone 'com.google.errorprone:error_prone_core:2.48.0'
+
+    // just tests - no Kotlin otherwise
+    testImplementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
 }
 
 shadowJar {
@@ -150,27 +201,86 @@ shadowJar {
     manifest {
         attributes('Automatic-Module-Name': 'com.graphqljava')
     }
-    //Apply biz.aQute.bnd.builder plugin logic to shadowJar as in BndBuilderPlugin 
-    convention.plugins.bundle = new aQute.bnd.gradle.BundleTaskConvention(it)
-    doLast {
-        //Call bnd after the ShadowJar was built to update the MANIFEST.MF
-        buildBundle()
-    }
+}
 
-    //Configure bnd for shadowJar
-    // -exportcontents: graphql.*  Adds all packages of graphql and below to the exported packages list
-    // -removeheaders:  Private-Package Removes the MANIFEST.MF header Private-Package, which contains all the internal packages and 
-    //                                  also the repackaged packages like guava, which would be wrong after repackaging.
-    // Import-Package:  Changes the imported packages header, to exclude guava and dependencies from the import list (! excludes packages)
-    //                  Guava was repackaged and included inside the jar, so we need to remove it.
-    //                  ANTLR was shaded, so we need to remove it.
-    //                  sun.misc is a JRE internal-only class that is not directly used by graphql-java. It was causing problems in libraries using graphql-java.
-    //                  The last ,* copies all the existing imports from the other dependencies, which is required.
-    bnd('''
+// Apply bnd to shadowJar task manually for Gradle 9 compatibility
+tasks.named('shadowJar').configure {
+    // Get the BundleTaskExtension added by bnd plugin
+    def bundle = extensions.findByType(BundleTaskExtension)
+    if (bundle != null) {
+        //Configure bnd for shadowJar
+        // -exportcontents: graphql.*  Adds all packages of graphql and below to the exported packages list
+        // -removeheaders:  Private-Package Removes the MANIFEST.MF header Private-Package, which contains all the internal packages and 
+        //                                  also the repackaged packages like guava, which would be wrong after repackaging.
+        // Import-Package:  Changes the imported packages header, to exclude guava and dependencies from the import list (! excludes packages)
+        //                  Guava was repackaged and included inside the jar, so we need to remove it.
+        //                  ANTLR was shaded, so we need to remove it.
+        //                  sun.misc is a JRE internal-only class that is not directly used by graphql-java. It was causing problems in libraries using graphql-java.
+        //                  The last ,* copies all the existing imports from the other dependencies, which is required.
+        bundle.bnd('''
 -exportcontents: graphql.*
 -removeheaders: Private-Package
-Import-Package: !android.os.*,!com.google.*,!org.checkerframework.*,!javax.annotation.*,!graphql.com.google.*,!org.antlr.*,!graphql.org.antlr.*,!sun.misc.*,*
+Import-Package: !android.os.*,!com.google.*,!org.checkerframework.*,!graphql.com.google.*,!org.antlr.*,!graphql.org.antlr.*,!sun.misc.*,org.jspecify.annotations;resolution:=optional,*
 ''')
+    }
+}
+
+tasks.named('jmhJar') {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        project.configurations.jmhRuntimeClasspath
+                .filter { it.exists() }
+                .collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
+
+jcstress {
+}
+
+tasks.named('jcstress') {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+jmh {
+    if (project.hasProperty('jmhInclude')) {
+        includes = [project.property('jmhInclude')]
+    }
+    if (project.hasProperty('jmhProfilers')) {
+        def profStr = project.property('jmhProfilers') as String
+        if (profStr.startsWith('async')) {
+            // Resolve native lib from ap-loader JAR on the jmh classpath
+            def apJar = configurations.jmh.files.find { it.name.contains('ap-loader') }
+            if (apJar) {
+                def proc = ['java', '-jar', apJar.absolutePath, 'agentpath'].execute()
+                proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+                def libPath = proc.text.trim()
+                if (libPath && new File(libPath).exists()) {
+                    if (profStr == 'async') {
+                        profilers = ["async:libPath=${libPath}"]
+                    } else {
+                        profilers = [profStr.replaceFirst('async:', "async:libPath=${libPath};")]
+                    }
+                } else {
+                    profilers = [profStr]
+                }
+            } else {
+                profilers = [profStr]
+            }
+        } else {
+            profilers = [profStr]
+        }
+    }
+    if (project.hasProperty('jmhFork')) {
+        fork = project.property('jmhFork') as int
+    }
+    if (project.hasProperty('jmhIterations')) {
+        iterations = project.property('jmhIterations') as int
+    }
+    if (project.hasProperty('jmhWarmupIterations')) {
+        warmupIterations = project.property('jmhWarmupIterations') as int
+    }
 }
 
 
@@ -190,9 +300,10 @@ task buildNewJar(type: Jar) {
     manifest {
         from file("build/extract/META-INF/MANIFEST.MF")
     }
+    def projectVersion = version
     doLast {
-        delete("build/libs/graphql-java-${project.version}.jar")
-        file("build/libs/graphql-java-tmp.jar").renameTo(file("build/libs/graphql-java-${project.version}.jar"))
+        delete("build/libs/graphql-java-${projectVersion}.jar")
+        file("build/libs/graphql-java-tmp.jar").renameTo(file("build/libs/graphql-java-${projectVersion}.jar"))
     }
 }
 
@@ -201,14 +312,135 @@ buildNewJar.dependsOn extractWithoutGuava
 shadowJar.finalizedBy extractWithoutGuava, buildNewJar
 
 
+// --- TestNG TCK skip verification ---
+// The Reactive Streams TCK PublisherVerification base class silently converts optional test
+// failures to skips. We verify the exact set of 49 expected skips after each testng run so
+// that a newly-silenced failure (or a newly-passing test) is caught immediately.
+
+def buildExpectedTestngSkips() {
+    def pkg = 'graphql.execution.reactive.tck.'
+    def allClasses = [
+            'CompletionStageMappingOrderedPublisherTckVerificationTest',
+            'CompletionStageMappingOrderedPublisherRandomCompleteTckVerificationTest',
+            'CompletionStageMappingPublisherTckVerificationTest',
+            'CompletionStageMappingPublisherRandomCompleteTckVerificationTest',
+            'SingleSubscriberPublisherTckVerificationTest',
+    ]
+    def multiSubscriberClasses = allClasses - ['SingleSubscriberPublisherTckVerificationTest']
+
+    // 8 methods skipped by all 5 classes (required_spec317 + 7 untested) = 40
+    def commonSkippedMethods = [
+            'required_spec317_mustNotSignalOnErrorWhenPendingAboveLongMaxValue',
+            'untested_spec106_mustConsiderSubscriptionCancelledAfterOnErrorOrOnCompleteHasBeenCalled',
+            'untested_spec107_mustNotEmitFurtherSignalsOnceOnErrorHasBeenSignalled',
+            'untested_spec108_possiblyCanceledSubscriptionShouldNotReceiveOnErrorOrOnCompleteSignals',
+            'untested_spec109_subscribeShouldNotThrowNonFatalThrowable',
+            'untested_spec110_rejectASubscriptionRequestIfTheSameSubscriberSubscribesTwice',
+            'untested_spec304_requestShouldNotPerformHeavyComputations',
+            'untested_spec305_cancelMustNotSynchronouslyPerformHeavyComputation',
+    ]
+
+    // 1 method skipped by 4 multi-subscriber classes = 4
+    def multiSubscriberSkippedMethods = [
+            'stochastic_spec103_mustSignalOnMethodsSequentially',
+    ]
+
+    // 5 methods skipped by SingleSubscriber only = 5
+    def singleSubscriberSkippedMethods = [
+            'optional_spec111_maySupportMultiSubscribe',
+            'optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfront',
+            'optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfrontAndCompleteAsExpected',
+            'optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingOneByOne',
+            'optional_spec111_registeredSubscribersMustReceiveOnNextOrOnCompleteSignals',
+    ]
+
+    def expected = [] as Set<String>
+    allClasses.each { cls ->
+        commonSkippedMethods.each { method -> expected.add(pkg + cls + '.' + method) }
+    }
+    multiSubscriberClasses.each { cls ->
+        multiSubscriberSkippedMethods.each { method -> expected.add(pkg + cls + '.' + method) }
+    }
+    singleSubscriberSkippedMethods.each { method ->
+        expected.add(pkg + 'SingleSubscriberPublisherTckVerificationTest.' + method)
+    }
+    return expected  // 40 + 4 + 5 = 49
+}
+
+def verifyTestngSkips(Task task, Set<String> expected) {
+    def xmlDir = task.reports.junitXml.outputLocation.asFile.get()
+    def actualSkips = [] as Set<String>
+    xmlDir.eachFileMatch(~/TEST-.*\.xml/) { file ->
+        def testsuite = new groovy.xml.XmlSlurper().parse(file)
+        testsuite.testcase.each { tc ->
+            if (tc.skipped.size() > 0) {
+                actualSkips.add(tc.@classname.toString() + '.' + tc.@name.toString())
+            }
+        }
+    }
+
+    def unexpected = actualSkips - expected
+    def missing = expected - actualSkips
+    if (unexpected || missing) {
+        def msg = new StringBuilder("TestNG TCK skip verification failed!\n")
+        if (unexpected) {
+            msg.append("\nUnexpected skips (tests that should pass but were skipped):\n")
+            unexpected.toSorted().each { msg.append("  + ${it}\n") }
+        }
+        if (missing) {
+            msg.append("\nMissing skips (tests that should be skipped but were not):\n")
+            missing.toSorted().each { msg.append("  - ${it}\n") }
+        }
+        msg.append("\nUpdate buildExpectedTestngSkips() in build.gradle if these changes are intentional.")
+        throw new GradleException(msg.toString())
+    }
+    logger.lifecycle("TestNG TCK skip verification passed: ${actualSkips.size()} skips match expected set.")
+}
+
+def expectedTestngSkips = buildExpectedTestngSkips()
+
 task testng(type: Test) {
     useTestNG()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    dependsOn tasks.named('testClasses')
+    doLast { verifyTestngSkips(it, expectedTestngSkips) }
 }
-check.dependsOn testng
-
 compileJava {
     options.compilerArgs += ["-parameters"]
     source file("build/generated-src"), sourceSets.main.java
+    // Gradle 9 requires explicit task dependencies
+    mustRunAfter generateTestGrammarSource, generateJmhGrammarSource, generateJcstressGrammarSource
+}
+
+tasks.withType(GroovyCompile) {
+    // Options when compiling Java using the Groovy plugin.
+    // (Groovy itself defaults to UTF-8 for Groovy code)
+    options.encoding = 'UTF-8'
+    sourceCompatibility = '11'
+    targetCompatibility = '11'
+    groovyOptions.forkOptions.memoryMaximumSize = "4g"
+}
+
+tasks.withType(JavaCompile) {
+    options.release = 11
+    options.errorprone {
+        disableAllChecks = true
+        check("NullAway", CheckSeverity.ERROR)
+        //
+        // end state has us with this config turned on - eg all classes
+        //
+        //option("NullAway:AnnotatedPackages", "graphql")
+        option("NullAway:CustomContractAnnotations", "graphql.Contract")
+        option("NullAway:OnlyNullMarked", "true")
+        option("NullAway:JSpecifyMode", "true")
+    }
+    // Include to disable NullAway on test code
+    if (name.toLowerCase().contains("test") || name.toLowerCase().contains("jcstress")) {
+        options.errorprone {
+            disable("NullAway")
+        }
+    }
 }
 
 generateGrammarSource {
@@ -218,9 +450,9 @@ generateGrammarSource {
     outputDirectory = file("${project.buildDir}/generated-src/antlr/main/graphql/parser/antlr")
 }
 generateGrammarSource.inputs
-    .dir('src/main/antlr')
-    .withPropertyName('sourceDir')
-    .withPathSensitivity(PathSensitivity.RELATIVE)
+        .dir('src/main/antlr')
+        .withPropertyName('sourceDir')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 
 
 task sourcesJar(type: Jar) {
@@ -238,24 +470,197 @@ javadoc {
     options.encoding = 'UTF-8'
 }
 
-artifacts {
-    archives sourcesJar
-    archives javadocJar
-}
+// Removed deprecated archives configuration in favor of direct assemble dependencies
 
 List<TestDescriptor> failedTests = []
+Map<String, Integer> testsAndTime = [:]
+Map<String, Integer> testClassesAndTime = [:]
+int testCount = 0
+long testTime = 0L
 
-test {
+tasks.withType(Test) {
+    if (!name.startsWith('testng')) {
+        useJUnitPlatform()
+    }
+    maxHeapSize = "1g"
     testLogging {
         events "FAILED", "SKIPPED"
         exceptionFormat = "FULL"
     }
 
+    // Required for JMH ArchUnit tests
+    classpath += sourceSets.jmh.output
+    dependsOn "jmhClasses"
+
     afterTest { TestDescriptor descriptor, TestResult result ->
+        testCount++
         if (result.getFailedTestCount() > 0) {
             failedTests.add(descriptor)
         }
+        def ms = (int) (result.endTime - result.startTime)
+        testTime += ms
+        String className = descriptor.className ?: "unknown"
+        String name = className + "." + descriptor.displayName
+        if (ms > 500) {
+            testsAndTime[name] = ms
+            testClassesAndTime.compute(className) { k, v -> v == null ? ms : v + ms }
+            println "\tTest '$name' took ${ms}ms"
+        }
     }
+}
+
+tasks.register('testWithJava21', Test) {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    classpath += sourceSets.jmh.output
+    dependsOn "jmhClasses"
+    dependsOn tasks.named('testClasses')
+}
+
+tasks.register('testWithJava17', Test) {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    classpath += sourceSets.jmh.output
+    dependsOn "jmhClasses"
+
+
+    dependsOn tasks.named('testClasses')
+
+}
+
+tasks.register('testWithJava11', Test) {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(11)
+    }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+
+    dependsOn tasks.named('testClasses')
+
+    classpath += sourceSets.jmh.output
+    dependsOn "jmhClasses"
+
+}
+
+['11', '17', '21'].each { ver ->
+    tasks.register("testngWithJava${ver}", Test) {
+        useTestNG()
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(ver)
+        }
+        testClassesDirs = sourceSets.test.output.classesDirs
+        classpath = sourceSets.test.runtimeClasspath
+        dependsOn tasks.named('testClasses')
+        doLast { verifyTestngSkips(it, expectedTestngSkips) }
+    }
+}
+
+
+jacoco {
+    toolVersion = "0.8.14"
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+
+    // Use the modified classes from classes-jacoco/ (with @Generated annotations)
+    // so CRC64 checksums match the execution data recorded during tests.
+    // Also exclude generated ANTLR code and shaded dependencies from coverage.
+    afterEvaluate {
+        classDirectories.setFrom(files(
+                fileTree(dir: layout.buildDirectory.dir('classes-jacoco/java/main'), exclude: [
+                        'graphql/parser/antlr/**',
+                        'graphql/com/google/**',
+                        'graphql/org/antlr/**'
+                ])
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mark identity equals(Object)/hashCode() with a @Generated annotation so
+// JaCoCo's AnnotationGeneratedFilter excludes them from coverage.
+// The annotation class need not exist — JaCoCo only inspects the descriptor
+// string in the bytecode, and the JVM ignores unknown CLASS-retention
+// annotations.
+//
+// IMPORTANT: modifications are made on a COPY in classes-jacoco/ so that
+// the original (pristine) class files in classes/java/main are packaged
+// into the published jar unchanged.
+// ---------------------------------------------------------------------------
+tasks.register('markGeneratedEqualsHashCode') {
+    description = 'Add @Generated annotation to equals/hashCode so JaCoCo ignores them'
+    dependsOn classes
+
+    def originalDir = layout.buildDirectory.dir('classes/java/main')
+    def jacocoDir = layout.buildDirectory.dir('classes-jacoco/java/main')
+
+    inputs.dir(originalDir)
+    inputs.property("generatedAnnotationTaskVersion", 2)
+    outputs.dir(jacocoDir)
+
+    doLast {
+        def src = originalDir.get().asFile
+        def dest = jacocoDir.get().asFile
+        project.delete(dest)
+        if (!src.exists()) return
+
+        // Copy all class files to a separate directory for JaCoCo
+        ant.copy(todir: dest) {
+            fileset(dir: src)
+        }
+
+        def ANNOTATION = 'Lgraphql/coverage/Generated;'
+
+        dest.eachFileRecurse(groovy.io.FileType.FILES) { file ->
+            if (!file.name.endsWith('.class')) return
+
+            def bytes = file.bytes
+            def classNode = new org.objectweb.asm.tree.ClassNode()
+            new org.objectweb.asm.ClassReader(bytes).accept(classNode, 0)
+
+            boolean modified = false
+            for (method in classNode.methods) {
+                if ((method.name == 'equals' && method.desc == '(Ljava/lang/Object;)Z') ||
+                        (method.name == 'hashCode' && method.desc == '()I')) {
+                    if (method.invisibleAnnotations == null) {
+                        method.invisibleAnnotations = []
+                    }
+                    if (!method.invisibleAnnotations.any { it.desc == ANNOTATION }) {
+                        method.invisibleAnnotations.add(new org.objectweb.asm.tree.AnnotationNode(ANNOTATION))
+                        modified = true
+                    }
+                }
+            }
+
+            if (modified) {
+                def writer = new org.objectweb.asm.ClassWriter(0)
+                classNode.accept(writer)
+                file.bytes = writer.toByteArray()
+            }
+        }
+    }
+}
+
+// Test tasks need the modified classes for JaCoCo coverage recording
+tasks.named('test') { dependsOn markGeneratedEqualsHashCode }
+tasks.named('compileTestJava') { dependsOn markGeneratedEqualsHashCode }
+
+// Prepend modified classes to the test classpath so the JaCoCo agent records
+// execution data with CRC64s that match the annotated bytecode.
+tasks.named('test', Test) {
+    classpath = files(layout.buildDirectory.dir('classes-jacoco/java/main')) + classpath
 }
 
 /*
@@ -265,6 +670,10 @@ test {
  * See https://github.com/gradle/gradle/issues/20151
  */
 gradle.buildFinished {
+    println "\n\n"
+    println "============================"
+    println "$testCount tests run in $testTime ms"
+    println "============================"
     if (!failedTests.isEmpty()) {
         println "\n\n"
         println "============================"
@@ -275,6 +684,28 @@ gradle.buildFinished {
         }
         println "============================"
     }
+    // slowest tests
+    println "\n\n"
+    println "============================"
+    println "Top 20 slowest test classes"
+    println "============================"
+    showTestResults(testClassesAndTime,20) { e ->
+        println "\tTest class ${e.key} took ${e.value}ms"
+    }
+    println "\n\n"
+    println "============================"
+    println "Top 50 slowest tests"
+    println "============================"
+    showTestResults(testsAndTime,50) { e ->
+        println "\tTest ${e.key} took ${e.value}ms"
+    }
+}
+
+static private showTestResults(Map<String, Integer> testMap, int limit, Closure closure) {
+    testMap.entrySet().stream()
+            .sorted { e1, e2 -> e2.getValue() - e1.getValue() }
+            .limit(limit)
+            .forEach(closure)
 }
 
 
@@ -289,7 +720,7 @@ publishing {
     publications {
 
         graphqlJava(MavenPublication) {
-            version version
+            version = version
             from components.java
 
             artifact sourcesJar {
@@ -343,14 +774,18 @@ publishing {
 nexusPublishing {
     repositories {
         sonatype {
-            username = System.env.MAVEN_CENTRAL_USER
-            password = System.env.MAVEN_CENTRAL_PASSWORD
+            username = System.env.MAVEN_CENTRAL_USER_NEW
+            password = System.env.MAVEN_CENTRAL_PASSWORD_NEW
+            // https://central.sonatype.org/publish/publish-portal-ossrh-staging-api/#configuration
+            nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
+            // GraphQL Java does not publish snapshots, but adding this URL for completeness
+            snapshotRepositoryUrl.set(uri("https://central.sonatype.com/repository/maven-snapshots/"))
         }
     }
 }
 
 signing {
-    required { !project.hasProperty('publishToMavenLocal') }
+    setRequired { !project.hasProperty('publishToMavenLocal') }
     def signingKey = System.env.MAVEN_CENTRAL_PGP_KEY
     useInMemoryPgpKeys(signingKey, "")
     sign publishing.publications
@@ -367,6 +802,4 @@ tasks.withType(GenerateModuleMetadata) {
     enabled = false
 }
 
-test {
-    useJUnitPlatform()
-}
+

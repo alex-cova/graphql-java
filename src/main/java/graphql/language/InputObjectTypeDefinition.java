@@ -1,14 +1,16 @@
 package graphql.language;
 
-
 import com.google.common.collect.ImmutableList;
 import graphql.Internal;
 import graphql.PublicApi;
 import graphql.collect.ImmutableKit;
+import graphql.util.FpKit;
 import graphql.util.TraversalControl;
 import graphql.util.TraverserContext;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,10 +22,11 @@ import static graphql.collect.ImmutableKit.emptyList;
 import static graphql.language.NodeChildrenContainer.newNodeChildrenContainer;
 
 @PublicApi
+@NullMarked
 public class InputObjectTypeDefinition extends AbstractDescribedNode<InputObjectTypeDefinition> implements TypeDefinition<InputObjectTypeDefinition>, DirectivesContainer<InputObjectTypeDefinition>, NamedNode<InputObjectTypeDefinition> {
 
     private final String name;
-    private final ImmutableList<Directive> directives;
+    private final NodeUtil.DirectivesHolder directives;
     private final ImmutableList<InputValueDefinition> inputValueDefinitions;
 
     public static final String CHILD_DIRECTIVES = "directives";
@@ -33,20 +36,35 @@ public class InputObjectTypeDefinition extends AbstractDescribedNode<InputObject
     protected InputObjectTypeDefinition(String name,
                                         List<Directive> directives,
                                         List<InputValueDefinition> inputValueDefinitions,
-                                        Description description,
-                                        SourceLocation sourceLocation,
+                                        @Nullable Description description,
+                                        @Nullable SourceLocation sourceLocation,
                                         List<Comment> comments,
                                         IgnoredChars ignoredChars,
                                         Map<String, String> additionalData) {
         super(sourceLocation, comments, ignoredChars, additionalData, description);
         this.name = name;
-        this.directives = ImmutableList.copyOf(directives);
+        this.directives = NodeUtil.DirectivesHolder.of(directives);
         this.inputValueDefinitions = ImmutableList.copyOf(inputValueDefinitions);
     }
 
     @Override
     public List<Directive> getDirectives() {
-        return directives;
+        return directives.getDirectives();
+    }
+
+    @Override
+    public Map<String, List<Directive>> getDirectivesByName() {
+        return directives.getDirectivesByName();
+    }
+
+    @Override
+    public List<Directive> getDirectives(String directiveName) {
+        return directives.getDirectives(directiveName);
+    }
+
+    @Override
+    public boolean hasDirective(String directiveName) {
+        return directives.hasDirective(directiveName);
     }
 
     public List<InputValueDefinition> getInputValueDefinitions() {
@@ -60,16 +78,13 @@ public class InputObjectTypeDefinition extends AbstractDescribedNode<InputObject
 
     @Override
     public List<Node> getChildren() {
-        List<Node> result = new ArrayList<>();
-        result.addAll(directives);
-        result.addAll(inputValueDefinitions);
-        return result;
+        return FpKit.concat(directives.getDirectives(), inputValueDefinitions);
     }
 
     @Override
     public NodeChildrenContainer getNamedChildren() {
         return newNodeChildrenContainer()
-                .children(CHILD_DIRECTIVES, directives)
+                .children(CHILD_DIRECTIVES, directives.getDirectives())
                 .children(CHILD_INPUT_VALUES_DEFINITIONS, inputValueDefinitions)
                 .build();
     }
@@ -83,7 +98,7 @@ public class InputObjectTypeDefinition extends AbstractDescribedNode<InputObject
     }
 
     @Override
-    public boolean isEqualTo(Node o) {
+    public boolean isEqualTo(@Nullable Node o) {
         if (this == o) {
             return true;
         }
@@ -99,8 +114,8 @@ public class InputObjectTypeDefinition extends AbstractDescribedNode<InputObject
     @Override
     public InputObjectTypeDefinition deepCopy() {
         return new InputObjectTypeDefinition(name,
-                deepCopy(directives),
-                deepCopy(inputValueDefinitions),
+                assertNotNull(deepCopy(directives.getDirectives()), "directives cannot be null"),
+                assertNotNull(deepCopy(inputValueDefinitions), "inputValueDefinitions cannot be null"),
                 description,
                 getSourceLocation(),
                 getComments(),
@@ -133,6 +148,7 @@ public class InputObjectTypeDefinition extends AbstractDescribedNode<InputObject
         return builder.build();
     }
 
+    @NullUnmarked
     public static final class Builder implements NodeDirectivesBuilder {
         private SourceLocation sourceLocation;
         private ImmutableList<Comment> comments = emptyList();

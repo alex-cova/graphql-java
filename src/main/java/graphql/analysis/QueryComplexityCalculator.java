@@ -4,6 +4,9 @@ import graphql.PublicApi;
 import graphql.execution.CoercedVariables;
 import graphql.language.Document;
 import graphql.schema.GraphQLSchema;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -16,19 +19,20 @@ import static java.util.Optional.ofNullable;
  * into it.
  */
 @PublicApi
+@NullMarked
 public class QueryComplexityCalculator {
 
     private final FieldComplexityCalculator fieldComplexityCalculator;
     private final GraphQLSchema schema;
     private final Document document;
-    private final String operationName;
+    private final @Nullable String operationName;
     private final CoercedVariables variables;
 
     public QueryComplexityCalculator(Builder builder) {
-        this.fieldComplexityCalculator = assertNotNull(builder.fieldComplexityCalculator, () -> "fieldComplexityCalculator can't be null");
-        this.schema = assertNotNull(builder.schema, () -> "schema can't be null");
-        this.document = assertNotNull(builder.document, () -> "document can't be null");
-        this.variables = assertNotNull(builder.variables, () -> "variables can't be null");
+        this.fieldComplexityCalculator = assertNotNull(builder.fieldComplexityCalculator, "fieldComplexityCalculator can't be null");
+        this.schema = assertNotNull(builder.schema, "schema can't be null");
+        this.document = assertNotNull(builder.document, "document can't be null");
+        this.variables = assertNotNull(builder.variables, "variables can't be null");
         this.operationName = builder.operationName;
     }
 
@@ -95,6 +99,7 @@ public class QueryComplexityCalculator {
         return new Builder();
     }
 
+    @NullUnmarked
     public static class Builder {
         private FieldComplexityCalculator fieldComplexityCalculator;
         private GraphQLSchema schema;

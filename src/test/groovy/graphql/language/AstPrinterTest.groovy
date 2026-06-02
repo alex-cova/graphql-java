@@ -3,6 +3,8 @@ package graphql.language
 import graphql.parser.Parser
 import spock.lang.Specification
 
+import java.nio.CharBuffer
+
 class AstPrinterTest extends Specification {
 
     Document parse(String input) {
@@ -404,6 +406,45 @@ query HeroNameAndFriends($episode: Episode = "JEDI") {
 '''
     }
 
+    def "ast printing of executable descriptions"() {
+        def query = '''
+"Fetches a hero"
+query getHero(
+  "The hero id"
+  $id: ID!
+) {
+  hero(id: $id) {
+    ...heroFields
+  }
+}
+
+"Reusable hero fields"
+fragment heroFields on Hero {
+  name
+}
+'''
+        def document = parse(query)
+        String output = printAst(document)
+
+        expect:
+        output == '''"Fetches a hero"
+query getHero(
+  "The hero id"
+  $id: ID!
+) {
+  hero(id: $id) {
+    ...heroFields
+  }
+}
+
+"Reusable hero fields"
+fragment heroFields on Hero {
+  name
+}
+'''
+        isParseableAst(output)
+    }
+
 //-------------------------------------------------
     def "ast printing of null"() {
         def query = '''
@@ -768,5 +809,42 @@ extend input Input @directive {
         String output = printAst(field_with_empty_selection_set)
         then:
         output == "foo"
+    }
+
+    def "printAstTo writes to a StringBuilder instance"() {
+        def document = parse(starWarsSchema)
+        def output = new StringBuilder()
+        AstPrinter.printAstTo(document.getDefinitions().get(0), output)
+
+        expect:
+        output.toString() == """schema {
+  query: QueryType
+  mutation: Mutation
+}"""
+    }
+
+    def "printAstTo writes to a Writer instance"() {
+        def document = parse(starWarsSchema)
+        def output = new StringWriter()
+        AstPrinter.printAstTo(document.getDefinitions().get(0), output)
+
+        expect:
+        output.toString() == """schema {
+  query: QueryType
+  mutation: Mutation
+}"""
+    }
+
+    def "printAstTo writes to an Appendable instance"() {
+        def document = parse(starWarsSchema)
+        def output = CharBuffer.allocate(100)
+        AstPrinter.printAstTo(document.getDefinitions().get(0), output)
+        output.flip()
+
+        expect:
+        output.toString() == """schema {
+  query: QueryType
+  mutation: Mutation
+}"""
     }
 }

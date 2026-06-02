@@ -3,16 +3,20 @@ package graphql.analysis;
 import graphql.PublicApi;
 import graphql.execution.instrumentation.parameters.InstrumentationExecuteOperationParameters;
 import graphql.execution.instrumentation.parameters.InstrumentationValidationParameters;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
+import org.jspecify.annotations.NullUnmarked;
 
 /**
  * The query complexity info.
  */
 @PublicApi
+@NullMarked
 public class QueryComplexityInfo {
 
     private final int complexity;
-    private final InstrumentationValidationParameters instrumentationValidationParameters;
-    private final InstrumentationExecuteOperationParameters instrumentationExecuteOperationParameters;
+    private final @Nullable InstrumentationValidationParameters instrumentationValidationParameters;
+    private final @Nullable InstrumentationExecuteOperationParameters instrumentationExecuteOperationParameters;
 
     private QueryComplexityInfo(Builder builder) {
         this.complexity = builder.complexity;
@@ -34,7 +38,7 @@ public class QueryComplexityInfo {
      *
      * @return the instrumentation validation parameters.
      */
-    public InstrumentationValidationParameters getInstrumentationValidationParameters() {
+    public @Nullable InstrumentationValidationParameters getInstrumentationValidationParameters() {
         return instrumentationValidationParameters;
     }
 
@@ -43,7 +47,7 @@ public class QueryComplexityInfo {
      *
      * @return the instrumentation execute operation parameters.
      */
-    public InstrumentationExecuteOperationParameters getInstrumentationExecuteOperationParameters() {
+    public @Nullable InstrumentationExecuteOperationParameters getInstrumentationExecuteOperationParameters() {
         return instrumentationExecuteOperationParameters;
     }
 
@@ -62,6 +66,7 @@ public class QueryComplexityInfo {
     }
 
     @PublicApi
+    @NullUnmarked
     public static class Builder {
 
         private int complexity;

@@ -4,6 +4,8 @@ import com.google.common.collect.ImmutableList;
 import graphql.AssertException;
 import graphql.PublicApi;
 import graphql.collect.ImmutableKit;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -21,6 +23,7 @@ import static java.lang.String.format;
  * class represents that path as a series of segments.
  */
 @PublicApi
+@NullMarked
 public class ResultPath {
     private static final ResultPath ROOT_PATH = new ResultPath();
 
@@ -33,40 +36,46 @@ public class ResultPath {
         return ROOT_PATH;
     }
 
-    private final ResultPath parent;
-    private final Object segment;
+    private final @Nullable ResultPath parent;
+    private final @Nullable Object segment;
 
     // hash is effective immutable but lazily initialized similar to the hash code of java.lang.String
     private int hash;
+    // lazily initialized similar to hash - computed on first toString() call
+    private @Nullable String toStringValue;
+    private final int level;
 
     private ResultPath() {
         parent = null;
         segment = null;
+        this.level = 0;
+        this.toStringValue = "";
     }
 
     private ResultPath(ResultPath parent, String segment) {
-        this.parent = assertNotNull(parent, () -> "Must provide a parent path");
-        this.segment = assertNotNull(segment, () -> "Must provide a sub path");
+        this.parent = assertNotNull(parent, "Must provide a parent path");
+        this.segment = assertNotNull(segment, "Must provide a sub path");
+        this.level = parent.level + 1;
     }
 
     private ResultPath(ResultPath parent, int segment) {
-        this.parent = assertNotNull(parent, () -> "Must provide a parent path");
+        this.parent = assertNotNull(parent, "Must provide a parent path");
         this.segment = segment;
+        this.level = parent.level;
+    }
+
+    private String initString() {
+        if (parent == null) {
+            return "";
+        }
+        return parent.toString() + segmentToString();
     }
 
     public int getLevel() {
-        int counter = 0;
-        ResultPath currentPath = this;
-        while (currentPath != null) {
-            if (currentPath.segment instanceof String) {
-                counter++;
-            }
-            currentPath = currentPath.parent;
-        }
-        return counter;
+        return level;
     }
 
-    public ResultPath getPathWithoutListEnd() {
+    public @Nullable ResultPath getPathWithoutListEnd() {
         if (ROOT_PATH.equals(this)) {
             return ROOT_PATH;
         }
@@ -92,18 +101,18 @@ public class ResultPath {
 
 
     public String getSegmentName() {
-        return (String) segment;
+        return (String) assertNotNull(segment);
     }
 
     public int getSegmentIndex() {
-        return (int) segment;
+        return (int) assertNotNull(segment);
     }
 
-    public Object getSegmentValue() {
+    public @Nullable Object getSegmentValue() {
         return segment;
     }
 
-    public ResultPath getParent() {
+    public @Nullable ResultPath getParent() {
         return parent;
     }
 
@@ -114,7 +123,7 @@ public class ResultPath {
      *
      * @return a parsed execution path
      */
-    public static ResultPath parse(String pathString) {
+    public static ResultPath parse(@Nullable String pathString) {
         pathString = pathString == null ? "" : pathString;
         String finalPathString = pathString.trim();
         StringTokenizer st = new StringTokenizer(finalPathString, "/[]", true);
@@ -122,13 +131,13 @@ public class ResultPath {
         while (st.hasMoreTokens()) {
             String token = st.nextToken();
             if ("/".equals(token)) {
-                assertTrue(st.hasMoreTokens(), () -> String.format(mkErrMsg(), finalPathString));
+                assertTrue(st.hasMoreTokens(), mkErrMsg(), finalPathString);
                 path = path.segment(st.nextToken());
             } else if ("[".equals(token)) {
-                assertTrue(st.countTokens() >= 2, () -> String.format(mkErrMsg(), finalPathString));
+                assertTrue(st.countTokens() >= 2, mkErrMsg(), finalPathString);
                 path = path.segment(Integer.parseInt(st.nextToken()));
                 String closingBrace = st.nextToken();
-                assertTrue(closingBrace.equals("]"), () -> String.format(mkErrMsg(), finalPathString));
+                assertTrue(closingBrace.equals("]"), mkErrMsg(), finalPathString);
             } else {
                 throw new AssertException(format(mkErrMsg(), pathString));
             }
@@ -189,7 +198,7 @@ public class ResultPath {
      *
      * @return a new path with the last segment dropped off
      */
-    public ResultPath dropSegment() {
+    public @Nullable ResultPath dropSegment() {
         if (this == rootPath()) {
             return null;
         }
@@ -205,8 +214,8 @@ public class ResultPath {
      * @return a new path with the last segment replaced
      */
     public ResultPath replaceSegment(int segment) {
-        assertTrue(!ROOT_PATH.equals(this), () -> "You MUST not call this with the root path");
-        return new ResultPath(parent, segment);
+        assertTrue(!ROOT_PATH.equals(this), "You MUST not call this with the root path");
+        return new ResultPath(assertNotNull(parent, "parent must not be null for non-root path"), segment);
     }
 
     /**
@@ -218,8 +227,8 @@ public class ResultPath {
      * @return a new path with the last segment replaced
      */
     public ResultPath replaceSegment(String segment) {
-        assertTrue(!ROOT_PATH.equals(this), () -> "You MUST not call this with the root path");
-        return new ResultPath(parent, segment);
+        assertTrue(!ROOT_PATH.equals(this), "You MUST not call this with the root path");
+        return new ResultPath(assertNotNull(parent, "parent must not be null for non-root path"), segment);
     }
 
 
@@ -246,12 +255,12 @@ public class ResultPath {
 
     public ResultPath sibling(String siblingField) {
         assertTrue(!ROOT_PATH.equals(this), "You MUST not call this with the root path");
-        return new ResultPath(this.parent, siblingField);
+        return new ResultPath(assertNotNull(this.parent, "parent must not be null for non-root path"), siblingField);
     }
 
     public ResultPath sibling(int siblingField) {
         assertTrue(!ROOT_PATH.equals(this), "You MUST not call this with the root path");
-        return new ResultPath(this.parent, siblingField);
+        return new ResultPath(assertNotNull(this.parent, "parent must not be null for non-root path"), siblingField);
     }
 
     /**
@@ -265,7 +274,7 @@ public class ResultPath {
         ResultPath p = this;
         while (p.segment != null) {
             list.addFirst(p.segment);
-            p = p.parent;
+            p = assertNotNull(p.parent, "non-root ResultPath must have a non-null parent");
         }
         return ImmutableList.copyOf(list);
     }
@@ -283,7 +292,7 @@ public class ResultPath {
             if (p.segment instanceof String) {
                 list.addFirst((String) p.segment);
             }
-            p = p.parent;
+            p = assertNotNull(p.parent, "non-root ResultPath must have a non-null parent");
         }
         return list;
     }
@@ -294,15 +303,12 @@ public class ResultPath {
      */
     @Override
     public String toString() {
-        if (parent == null) {
-            return "";
+        String s = toStringValue;
+        if (s == null) {
+            s = initString();
+            toStringValue = s;
         }
-
-        if (ROOT_PATH.equals(parent)) {
-            return segmentToString();
-        }
-
-        return parent.toString() + segmentToString();
+        return s;
     }
 
     public String segmentToString() {
@@ -328,8 +334,8 @@ public class ResultPath {
             if (!Objects.equals(self.segment, that.segment)) {
                 return false;
             }
-            self = self.parent;
-            that = that.parent;
+            self = assertNotNull(self.parent, "non-root ResultPath must have a non-null parent");
+            that = assertNotNull(that.parent, "non-root ResultPath must have a non-null parent");
         }
 
         return self.isRootPath() && that.isRootPath();

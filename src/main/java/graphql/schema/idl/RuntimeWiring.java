@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
+import org.jspecify.annotations.NullUnmarked;
 
 import static graphql.Assert.assertNotNull;
 import static graphql.schema.visibility.DefaultGraphqlFieldVisibility.DEFAULT_FIELD_VISIBILITY;
@@ -42,7 +43,8 @@ public class RuntimeWiring {
 
     /**
      * This is a Runtime wiring which provides mocked types resolver
-     * and scalars. Useful for testing only.
+     * and scalars. It is useful for testing only, for example for creating schemas
+     * that can be inspected but not executed on.
      */
     public static final RuntimeWiring MOCKED_WIRING = RuntimeWiring
             .newRuntimeWiring()
@@ -174,6 +176,7 @@ public class RuntimeWiring {
     }
 
     @PublicApi
+    @NullUnmarked
     public static class Builder {
         private final Map<String, Map<String, DataFetcher>> dataFetchers = new LinkedHashMap<>();
         private final Map<String, DataFetcher> defaultDataFetchers = new LinkedHashMap<>();
@@ -183,7 +186,7 @@ public class RuntimeWiring {
         private final Map<String, SchemaDirectiveWiring> registeredDirectiveWiring = new LinkedHashMap<>();
         private final List<SchemaDirectiveWiring> directiveWiring = new ArrayList<>();
         private WiringFactory wiringFactory = new NoopWiringFactory();
-        private boolean strictMode = false;
+        private boolean strictMode = true;
         private GraphqlFieldVisibility fieldVisibility = DEFAULT_FIELD_VISIBILITY;
         private GraphQLCodeRegistry codeRegistry = GraphQLCodeRegistry.newCodeRegistry().build();
         private GraphqlTypeComparatorRegistry comparatorRegistry = GraphqlTypeComparatorRegistry.AS_IS_REGISTRY;
@@ -193,10 +196,23 @@ public class RuntimeWiring {
         }
 
         /**
-         * This puts the builder into strict mode, so if things get defined twice, for example, it will throw a {@link StrictModeWiringException}.
+         * This sets strict mode as true or false. If strictMode is true, if things get defined twice, for example, it will throw a {@link StrictModeWiringException}.
          *
          * @return this builder
          */
+        public Builder strictMode(boolean strictMode) {
+            this.strictMode = strictMode;
+            return this;
+        }
+
+        /**
+         * This puts the builder into strict mode, so if things get defined twice, for example, it will throw a {@link StrictModeWiringException}.
+         *
+         * @return this builder
+         *
+         * @deprecated strictMode default value changed to true, use {@link #strictMode(boolean)} instead
+         */
+        @Deprecated(since = "2025-03-22", forRemoval = true)
         public Builder strictMode() {
             this.strictMode = true;
             return this;
@@ -210,7 +226,7 @@ public class RuntimeWiring {
          * @return this outer builder
          */
         public Builder wiringFactory(WiringFactory wiringFactory) {
-            assertNotNull(wiringFactory, () -> "You must provide a wiring factory");
+            assertNotNull(wiringFactory, "You must provide a wiring factory");
             this.wiringFactory = wiringFactory;
             return this;
         }
@@ -300,13 +316,23 @@ public class RuntimeWiring {
         public Builder type(TypeRuntimeWiring typeRuntimeWiring) {
             String typeName = typeRuntimeWiring.getTypeName();
             Map<String, DataFetcher> typeDataFetchers = dataFetchers.computeIfAbsent(typeName, k -> new LinkedHashMap<>());
+
+            Map<String, DataFetcher> additionalFieldDataFetchers = typeRuntimeWiring.getFieldDataFetchers();
             if (strictMode && !typeDataFetchers.isEmpty()) {
-                throw new StrictModeWiringException(format("The type %s has already been defined", typeName));
+                // Check if the existing type wiring contains overlapping DataFetcher definitions
+                for (String fieldName : additionalFieldDataFetchers.keySet()) {
+                    if (typeDataFetchers.containsKey(fieldName)) {
+                        throw new StrictModeWiringException(format("The field %s on type %s has already been defined", fieldName, typeName));
+                    }
+                }
             }
-            typeDataFetchers.putAll(typeRuntimeWiring.getFieldDataFetchers());
+            typeDataFetchers.putAll(additionalFieldDataFetchers);
 
             DataFetcher<?> defaultDataFetcher = typeRuntimeWiring.getDefaultDataFetcher();
             if (defaultDataFetcher != null) {
+                if (strictMode && defaultDataFetchers.containsKey(typeName)) {
+                    throw new StrictModeWiringException(format("The type %s already has a default data fetcher defined", typeName));
+                }
                 defaultDataFetchers.put(typeName, defaultDataFetcher);
             }
 

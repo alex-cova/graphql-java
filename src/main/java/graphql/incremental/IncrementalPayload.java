@@ -3,14 +3,14 @@ package graphql.incremental;
 import graphql.ExperimentalApi;
 import graphql.GraphQLError;
 import graphql.execution.ResultPath;
-import org.jetbrains.annotations.Nullable;
+import graphql.util.FpKit;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import static java.util.stream.Collectors.toList;
+import java.util.Objects;
 
 /**
  * Represents a payload that can be resolved after the initial response.
@@ -79,9 +79,30 @@ public abstract class IncrementalPayload {
     }
 
     protected Object errorsToSpec(List<GraphQLError> errors) {
-        return errors.stream().map(GraphQLError::toSpecification).collect(toList());
+        List<Map<String, Object>> list = FpKit.arrayListSizedTo(errors);
+        for (GraphQLError error : errors) {
+            list.add(error.toSpecification());
+        }
+        return list;
     }
 
+    public int hashCode() {
+        return Objects.hash(path, label, errors, extensions);
+    }
+
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        IncrementalPayload that = (IncrementalPayload) obj;
+        return Objects.equals(path, that.path) &&
+                Objects.equals(label, that.label) &&
+                Objects.equals(errors, that.errors) &&
+                Objects.equals(extensions, that.extensions);
+    }
 
     protected static abstract class Builder<T extends Builder<T>> {
         protected List<Object> path;

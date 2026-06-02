@@ -3,8 +3,9 @@ package graphql.schema;
 import graphql.Assert;
 import graphql.PublicApi;
 import graphql.introspection.Introspection;
-import graphql.schema.idl.DirectiveInfo;
+import graphql.Directives;
 import graphql.schema.idl.ScalarInfo;
+import org.jspecify.annotations.NullMarked;
 
 import java.util.Stack;
 import java.util.function.Predicate;
@@ -16,6 +17,7 @@ import static graphql.Assert.assertShouldNeverHappen;
  * A utility class that helps work with {@link graphql.schema.GraphQLType}s
  */
 @PublicApi
+@NullMarked
 public class GraphQLTypeUtil {
 
     /**
@@ -26,7 +28,7 @@ public class GraphQLTypeUtil {
      * @return the type in graphql SDL format, eg [typeName!]!
      */
     public static String simplePrint(GraphQLType type) {
-        Assert.assertNotNull(type, () -> "type can't be null");
+        Assert.assertNotNull(type, "type can't be null");
         if (isNonNull(type)) {
             return simplePrint(unwrapOne(type)) + "!";
         } else if (isList(type)) {
@@ -219,22 +221,26 @@ public class GraphQLTypeUtil {
 
 
     /**
-     * Unwraps all non nullable layers of the type until it reaches a type that is not {@link GraphQLNonNull}
+     * Unwraps a single non-nullable layer of the type if its present.  Note there can
+     * only ever be one non-nullable wrapping of a type and this is enforced by {@link GraphQLNonNull}
      *
      * @param type the type to unwrap
      *
      * @return the underlying type that is not {@link GraphQLNonNull}
      */
     public static GraphQLType unwrapNonNull(GraphQLType type) {
-        while (isNonNull(type)) {
-            type = unwrapOne(type);
+        // its illegal to have a type that is a non-null wrapping a non-null type
+        // and GraphQLNonNull has code that prevents it so we can just check once during the unwrapping
+        if (isNonNull(type)) {
+            // is cheaper doing this direct rather than calling #unwrapOne
+            type = ((GraphQLNonNull) type).getWrappedType();
         }
         return type;
     }
 
     /**
-     * Unwraps all non nullable layers of the type until it reaches a type that is not {@link GraphQLNonNull}
-     * and then cast to the target type.
+     * Unwraps a single non-nullable layer of the type if its present and then cast to the target type.  Note there can
+     * only ever be one non-nullable wrapping of a type and this is enforced by {@link GraphQLNonNull}
      *
      * @param type the type to unwrap
      * @param <T>  for two
@@ -289,7 +295,7 @@ public class GraphQLTypeUtil {
                 return ScalarInfo.isGraphqlSpecifiedScalar((GraphQLScalarType) schemaElement);
             }
             if (schemaElement instanceof GraphQLDirective) {
-                return DirectiveInfo.isGraphqlSpecifiedDirective((GraphQLDirective) schemaElement);
+                return Directives.isBuiltInDirective((GraphQLDirective) schemaElement);
             }
             if (schemaElement instanceof GraphQLNamedType) {
                 return Introspection.isIntrospectionTypes((GraphQLNamedType) schemaElement);

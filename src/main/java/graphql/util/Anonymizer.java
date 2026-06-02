@@ -60,7 +60,6 @@ import graphql.schema.GraphQLList;
 import graphql.schema.GraphQLNamedOutputType;
 import graphql.schema.GraphQLNamedSchemaElement;
 import graphql.schema.GraphQLNamedType;
-import graphql.schema.GraphQLNonNull;
 import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLScalarType;
 import graphql.schema.GraphQLSchema;
@@ -72,10 +71,10 @@ import graphql.schema.GraphQLTypeVisitorStub;
 import graphql.schema.GraphQLUnionType;
 import graphql.schema.SchemaTransformer;
 import graphql.schema.TypeResolver;
-import graphql.schema.idl.DirectiveInfo;
 import graphql.schema.idl.ScalarInfo;
 import graphql.schema.idl.TypeUtil;
 import graphql.schema.impl.SchemaUtil;
+import org.jspecify.annotations.NullMarked;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -92,8 +91,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static graphql.Assert.assertNotNull;
+import static graphql.Assert.assertShouldNeverHappen;
 import static graphql.parser.ParserEnvironment.newParserEnvironment;
-import static graphql.schema.GraphQLArgument.newArgument;
+import static graphql.schema.GraphQLNonNull.nonNull;
 import static graphql.schema.GraphQLTypeUtil.unwrapNonNull;
 import static graphql.schema.GraphQLTypeUtil.unwrapNonNullAs;
 import static graphql.schema.GraphQLTypeUtil.unwrapOneAs;
@@ -106,6 +106,7 @@ import static graphql.util.TreeTransformerUtil.changeNode;
  * into anonymized schemas and queries.
  */
 @PublicApi
+@NullMarked
 public class Anonymizer {
 
     public static class AnonymizeResult {
@@ -147,7 +148,7 @@ public class Anonymizer {
     }
 
     public static AnonymizeResult anonymizeSchemaAndQueries(GraphQLSchema schema, List<String> queries, Map<String, Object> variables) {
-        assertNotNull(queries, () -> "queries can't be null");
+        assertNotNull(queries, "queries can't be null");
 
         AtomicInteger defaultStringValueCounter = new AtomicInteger(1);
         AtomicInteger defaultIntValueCounter = new AtomicInteger(1);
@@ -260,17 +261,7 @@ public class Anonymizer {
 
             @Override
             public TraversalControl visitGraphQLDirective(GraphQLDirective graphQLDirective, TraverserContext<GraphQLSchemaElement> context) {
-                if (Directives.DEPRECATED_DIRECTIVE_DEFINITION.getName().equals(graphQLDirective.getName())) {
-                    GraphQLArgument reason = newArgument().name("reason")
-                            .type(Scalars.GraphQLString)
-                            .clearValue().build();
-                    GraphQLDirective newElement = graphQLDirective.transform(builder -> {
-                        builder.description(null).argument(reason);
-                    });
-                    changeNode(context, newElement);
-                    return TraversalControl.ABORT;
-                }
-                if (DirectiveInfo.isGraphqlSpecifiedDirective(graphQLDirective.getName())) {
+                if (Directives.isBuiltInDirective(graphQLDirective.getName())) {
                     return TraversalControl.ABORT;
                 }
                 String newName = assertNotNull(newNameMap.get(graphQLDirective));
@@ -285,14 +276,15 @@ public class Anonymizer {
                 if (Directives.DEPRECATED_DIRECTIVE_DEFINITION.getName().equals(graphQLDirective.getName())) {
                     GraphQLAppliedDirectiveArgument reason = GraphQLAppliedDirectiveArgument.newArgument().name("reason")
                             .type(Scalars.GraphQLString)
-                            .clearValue().build();
+                            .clearValue()
+                            .build();
                     GraphQLAppliedDirective newElement = graphQLDirective.transform(builder -> {
                         builder.description(null).argument(reason);
                     });
                     changeNode(context, newElement);
                     return TraversalControl.ABORT;
                 }
-                if (DirectiveInfo.isGraphqlSpecifiedDirective(graphQLDirective.getName())) {
+                if (Directives.isBuiltInDirective(graphQLDirective.getName())) {
                     return TraversalControl.ABORT;
                 }
                 String newName = assertNotNull(newNameMap.get(graphQLDirective));
@@ -403,7 +395,7 @@ public class Anonymizer {
         } else if (valueLiteral instanceof EnumValue) {
             GraphQLEnumType enumType = unwrapNonNullAs(argType);
             GraphQLEnumValueDefinition enumValueDefinition = enumType.getValue(((EnumValue) valueLiteral).getName());
-            String newName = newNameMap.get(enumValueDefinition);
+            String newName = assertNotNull(newNameMap.get(enumValueDefinition), "No new name found for enum value %s", ((EnumValue) valueLiteral).getName());
             return new EnumValue(newName);
         } else if (valueLiteral instanceof ObjectValue) {
             GraphQLInputObjectType inputObjectType = unwrapNonNullAs(argType);
@@ -526,7 +518,7 @@ public class Anonymizer {
 
             @Override
             public TraversalControl visitGraphQLDirective(GraphQLDirective graphQLDirective, TraverserContext<GraphQLSchemaElement> context) {
-                if (DirectiveInfo.isGraphqlSpecifiedDirective(graphQLDirective)) {
+                if (Directives.isBuiltInDirective(graphQLDirective)) {
                     return TraversalControl.ABORT;
                 }
                 recordDirectiveName.accept(graphQLDirective);
@@ -535,7 +527,7 @@ public class Anonymizer {
 
             @Override
             public TraversalControl visitGraphQLAppliedDirective(GraphQLAppliedDirective graphQLAppliedDirective, TraverserContext<GraphQLSchemaElement> context) {
-                if (DirectiveInfo.isGraphqlSpecifiedDirective(graphQLAppliedDirective.getName())) {
+                if (Directives.isBuiltInDirective(graphQLAppliedDirective.getName())) {
                     return TraversalControl.ABORT;
                 }
                 recordDirectiveName.accept(graphQLAppliedDirective);
@@ -669,7 +661,7 @@ public class Anonymizer {
         alreadyChecked.add(curObjectOrInterface);
 
         // "up": get all Interfaces
-        GraphQLImplementingType type = (GraphQLImplementingType) schema.getType(curObjectOrInterface);
+        GraphQLImplementingType type = assertNotNull((GraphQLImplementingType) schema.getType(curObjectOrInterface), "No type found for %s", curObjectOrInterface);
         List<GraphQLNamedOutputType> interfaces = type.getInterfaces();
         getMatchingFieldDefinitions(fieldName, interfaces, result);
         for (GraphQLNamedOutputType interfaze : interfaces) {
@@ -878,9 +870,13 @@ public class Anonymizer {
 
             @Override
             public TraversalControl visitInlineFragment(InlineFragment node, TraverserContext<Node> context) {
-                GraphQLType currentCondition = assertNotNull(schema.getType(node.getTypeCondition().getName()));
-                String newCondition = newNames.get(currentCondition);
-                return changeNode(context, node.transform(builder -> builder.typeCondition(new TypeName(newCondition))));
+                TypeName typeCondition = node.getTypeCondition();
+                if (typeCondition != null) {
+                    GraphQLType currentCondition = assertNotNull(schema.getType(typeCondition.getName()));
+                    String newCondition = newNames.get(currentCondition);
+                    return changeNode(context, node.transform(builder -> builder.typeCondition(new TypeName(newCondition))));
+                }
+                return TraversalControl.CONTINUE;
             }
 
             @Override
@@ -915,15 +911,13 @@ public class Anonymizer {
         if (type instanceof TypeName) {
             String typeName = ((TypeName) type).getName();
             GraphQLType graphQLType = schema.getType(typeName);
-            graphql.Assert.assertNotNull(graphQLType, "Schema must contain type %s", typeName);
-            return graphQLType;
+            return assertNotNull(graphQLType, "Schema must contain type %s", typeName);
         } else if (type instanceof NonNullType) {
-            return GraphQLNonNull.nonNull(fromTypeToGraphQLType(TypeUtil.unwrapOne(type), schema));
+            return nonNull(fromTypeToGraphQLType(TypeUtil.unwrapOne(type), schema));
         } else if (type instanceof ListType) {
             return GraphQLList.list(fromTypeToGraphQLType(TypeUtil.unwrapOne(type), schema));
         } else {
-            graphql.Assert.assertShouldNeverHappen();
-            return null;
+            return assertShouldNeverHappen();
         }
     }
 
@@ -936,8 +930,7 @@ public class Anonymizer {
         } else if (type instanceof NonNullType) {
             return NonNullType.newNonNullType(replaceTypeName(((NonNullType) type).getType(), newName)).build();
         } else {
-            graphql.Assert.assertShouldNeverHappen();
-            return null;
+            return assertShouldNeverHappen();
         }
     }
 

@@ -3,6 +3,7 @@ package graphql.execution;
 import graphql.ExecutionResult;
 import graphql.PublicApi;
 import graphql.execution.incremental.DeferredExecutionSupport;
+import org.jspecify.annotations.NullMarked;
 import graphql.execution.instrumentation.ExecutionStrategyInstrumentationContext;
 import graphql.execution.instrumentation.Instrumentation;
 import graphql.execution.instrumentation.parameters.InstrumentationExecutionStrategyParameters;
@@ -17,6 +18,7 @@ import java.util.function.BiConsumer;
  * The standard graphql execution strategy that runs fields asynchronously non-blocking.
  */
 @PublicApi
+@NullMarked
 public class AsyncExecutionStrategy extends AbstractAsyncExecutionStrategy {
 
     /**
@@ -39,7 +41,6 @@ public class AsyncExecutionStrategy extends AbstractAsyncExecutionStrategy {
     @SuppressWarnings("FutureReturnValueIgnored")
     public CompletableFuture<ExecutionResult> execute(ExecutionContext executionContext, ExecutionStrategyParameters parameters) throws NonNullableFieldWasNullException {
         DataLoaderDispatchStrategy dataLoaderDispatcherStrategy = executionContext.getDataLoaderDispatcherStrategy();
-        dataLoaderDispatcherStrategy.executionStrategy(executionContext, parameters);
         Instrumentation instrumentation = executionContext.getInstrumentation();
         InstrumentationExecutionStrategyParameters instrumentationParameters = new InstrumentationExecutionStrategyParameters(executionContext, parameters);
 
@@ -54,7 +55,11 @@ public class AsyncExecutionStrategy extends AbstractAsyncExecutionStrategy {
         }
 
         DeferredExecutionSupport deferredExecutionSupport = createDeferredExecutionSupport(executionContext, parameters);
+
+        dataLoaderDispatcherStrategy.executionStrategy(executionContext, parameters, deferredExecutionSupport.getNonDeferredFieldNames(fieldNames).size());
         Async.CombinedBuilder<FieldValueInfo> futures = getAsyncFieldValueInfo(executionContext, parameters, deferredExecutionSupport);
+        dataLoaderDispatcherStrategy.finishedFetching(executionContext, parameters);
+
 
         CompletableFuture<ExecutionResult> overallResult = new CompletableFuture<>();
         executionStrategyCtx.onDispatched();
@@ -63,6 +68,8 @@ public class AsyncExecutionStrategy extends AbstractAsyncExecutionStrategy {
             List<String> fieldsExecutedOnInitialResult = deferredExecutionSupport.getNonDeferredFieldNames(fieldNames);
 
             BiConsumer<List<Object>, Throwable> handleResultsConsumer = handleResults(executionContext, fieldsExecutedOnInitialResult, overallResult);
+            throwable = executionContext.possibleCancellation(throwable);
+
             if (throwable != null) {
                 handleResultsConsumer.accept(null, throwable.getCause());
                 return;
@@ -72,14 +79,14 @@ public class AsyncExecutionStrategy extends AbstractAsyncExecutionStrategy {
             for (FieldValueInfo completeValueInfo : completeValueInfos) {
                 fieldValuesFutures.addObject(completeValueInfo.getFieldValueObject());
             }
-            dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesInfo(completeValueInfos);
+            dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesInfo(completeValueInfos, parameters);
             executionStrategyCtx.onFieldValuesInfo(completeValueInfos);
             fieldValuesFutures.await().whenComplete(handleResultsConsumer);
         }).exceptionally((ex) -> {
             // if there are any issues with combining/handling the field results,
             // complete the future at all costs and bubble up any thrown exception so
             // the execution does not hang.
-            dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesException(ex);
+            dataLoaderDispatcherStrategy.executionStrategyOnFieldValuesException(ex, parameters);
             executionStrategyCtx.onFieldValuesException();
             overallResult.completeExceptionally(ex);
             return null;
@@ -88,4 +95,5 @@ public class AsyncExecutionStrategy extends AbstractAsyncExecutionStrategy {
         overallResult.whenComplete(executionStrategyCtx::onCompleted);
         return overallResult;
     }
+
 }

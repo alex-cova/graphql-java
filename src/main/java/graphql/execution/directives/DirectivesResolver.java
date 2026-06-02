@@ -1,8 +1,12 @@
 package graphql.execution.directives;
 
-import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
+import com.google.common.collect.ImmutableBiMap;
+import com.google.common.collect.ImmutableList;
 import graphql.GraphQLContext;
 import graphql.Internal;
+import graphql.collect.ImmutableKit;
 import graphql.execution.CoercedVariables;
 import graphql.execution.ValuesResolver;
 import graphql.language.Directive;
@@ -11,8 +15,6 @@ import graphql.schema.GraphQLCodeRegistry;
 import graphql.schema.GraphQLDirective;
 import graphql.schema.GraphQLSchema;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -26,27 +28,27 @@ public class DirectivesResolver {
     public DirectivesResolver() {
     }
 
-    public Map<String, List<GraphQLDirective>> resolveDirectives(List<Directive> directives, GraphQLSchema schema, Map<String, Object> variables, GraphQLContext graphQLContext, Locale locale) {
+    public BiMap<GraphQLDirective, Directive> resolveDirectives(List<Directive> directives, GraphQLSchema schema, CoercedVariables variables, GraphQLContext graphQLContext, Locale locale) {
         GraphQLCodeRegistry codeRegistry = schema.getCodeRegistry();
-        Map<String, List<GraphQLDirective>> directiveMap = new LinkedHashMap<>();
+        BiMap<GraphQLDirective, Directive> directiveMap = HashBiMap.create();
         directives.forEach(directive -> {
             GraphQLDirective protoType = schema.getDirective(directive.getName());
             if (protoType != null) {
-                GraphQLDirective newDirective = protoType.transform(builder -> buildArguments(builder, codeRegistry, protoType, directive, variables, graphQLContext, locale));
-                directiveMap.computeIfAbsent(newDirective.getName(), k -> new ArrayList<>()).add(newDirective);
+                GraphQLDirective graphQLDirective = protoType.transform(builder -> buildArguments(builder, codeRegistry, protoType, directive, variables, graphQLContext, locale));
+                directiveMap.put(graphQLDirective, directive);
             }
         });
-        return ImmutableMap.copyOf(directiveMap);
+        return ImmutableBiMap.copyOf(directiveMap);
     }
 
     private void buildArguments(GraphQLDirective.Builder directiveBuilder,
                                 GraphQLCodeRegistry codeRegistry,
                                 GraphQLDirective protoType,
                                 Directive fieldDirective,
-                                Map<String, Object> variables,
+                                CoercedVariables variables,
                                 GraphQLContext graphQLContext,
                                 Locale locale) {
-        Map<String, Object> argumentValues = ValuesResolver.getArgumentValues(codeRegistry, protoType.getArguments(), fieldDirective.getArguments(), CoercedVariables.of(variables), graphQLContext, locale);
+        Map<String, Object> argumentValues = ValuesResolver.getArgumentValues(codeRegistry, protoType.getArguments(), fieldDirective.getArguments(), variables, graphQLContext, locale);
         directiveBuilder.clearArguments();
         protoType.getArguments().forEach(protoArg -> {
             if (argumentValues.containsKey(protoArg.getName())) {
@@ -61,4 +63,34 @@ public class DirectivesResolver {
             }
         });
     }
+
+    public ImmutableList<QueryAppliedDirective> toAppliedDirectives(List<Directive> directives, GraphQLSchema schema, CoercedVariables variables, GraphQLContext graphQLContext, Locale locale) {
+        BiMap<GraphQLDirective, Directive> directivesMap = resolveDirectives(directives, schema, variables, graphQLContext, locale);
+        return ImmutableKit.map(directivesMap.keySet(), this::toAppliedDirective);
+    }
+
+    /**
+     * This helps us remodel the applied GraphQLDirective back to the better modelled and named {@link QueryAppliedDirective}
+     *
+     * @param directive the directive to remodel
+     *
+     * @return a QueryAppliedDirective
+     */
+    public QueryAppliedDirective toAppliedDirective(GraphQLDirective directive) {
+        QueryAppliedDirective.Builder builder = QueryAppliedDirective.newDirective();
+        builder.name(directive.getName());
+        for (GraphQLArgument argument : directive.getArguments()) {
+            builder.argument(toAppliedArgument(argument));
+        }
+        return builder.build();
+    }
+
+    public QueryAppliedDirectiveArgument toAppliedArgument(GraphQLArgument argument) {
+        return QueryAppliedDirectiveArgument.newArgument()
+                .name(argument.getName())
+                .type(argument.getType())
+                .inputValueWithState(argument.getArgumentValue())
+                .build();
+    }
+
 }

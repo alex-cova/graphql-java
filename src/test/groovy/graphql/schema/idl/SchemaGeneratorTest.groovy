@@ -25,10 +25,12 @@ import graphql.schema.GraphQLType
 import graphql.schema.GraphQLTypeUtil
 import graphql.schema.GraphQLUnionType
 import graphql.schema.GraphqlTypeComparatorRegistry
+import graphql.schema.idl.errors.DirectiveIllegalReferenceError
 import graphql.schema.idl.errors.NotAnInputTypeError
 import graphql.schema.idl.errors.NotAnOutputTypeError
 import graphql.schema.idl.errors.SchemaProblem
 import graphql.schema.visibility.GraphqlFieldVisibility
+import spock.lang.Issue
 import spock.lang.Specification
 
 import java.util.function.UnaryOperator
@@ -1530,6 +1532,64 @@ class SchemaGeneratorTest extends Specification {
         unionType.directivesByName.containsKey("directive")
     }
 
+    @Issue("https://github.com/graphql-java/graphql-java/issues/4200")
+    def "empty union base definition gets member types from extension"() {
+        def spec = """
+            type Cat {
+                meow: String
+            }
+
+            type Dog {
+                bark: String
+            }
+
+            union Pet
+
+            extend union Pet = Cat | Dog
+
+            type Query {
+                pet: Pet
+            }
+        """
+
+        when:
+        def schema = schema(spec)
+        GraphQLUnionType unionType = schema.getType("Pet") as GraphQLUnionType
+
+        then:
+        unionType.types*.name == ["Cat", "Dog"]
+    }
+
+    @Issue("https://github.com/graphql-java/graphql-java/issues/4200")
+    def "empty union base definition gets member types from multiple extensions"() {
+        def spec = """
+            type Cat {
+                meow: String
+            }
+
+            type Dog {
+                bark: String
+            }
+
+            union Pet
+
+            extend union Pet = | Cat
+
+            extend union Pet = Dog
+
+            type Query {
+                pet: Pet
+            }
+        """
+
+        when:
+        def schema = schema(spec)
+        GraphQLUnionType unionType = schema.getType("Pet") as GraphQLUnionType
+
+        then:
+        unionType.types*.name == ["Cat", "Dog"]
+    }
+
     def "enum extension types are combined"() {
         def spec = """
             type Query {
@@ -1770,7 +1830,8 @@ class SchemaGeneratorTest extends Specification {
 
         def appliedDirective = f1.getAppliedDirective("deprecated")
         appliedDirective.name == "deprecated"
-        appliedDirective.getArgument("reason").type == GraphQLString
+        appliedDirective.getArgument("reason").type instanceof GraphQLNonNull
+        (appliedDirective.getArgument("reason").type as GraphQLNonNull).wrappedType == GraphQLString
         printAst(appliedDirective.getArgument("reason").argumentValue.value as Node) == '"No longer supported"'
 
         when:
@@ -1781,7 +1842,8 @@ class SchemaGeneratorTest extends Specification {
 
         def appliedDirective2 = f2.getAppliedDirective("deprecated")
         appliedDirective2.name == "deprecated"
-        appliedDirective2.getArgument("reason").type == GraphQLString
+        appliedDirective2.getArgument("reason").type instanceof GraphQLNonNull
+        (appliedDirective2.getArgument("reason").type as GraphQLNonNull).wrappedType == GraphQLString
         printAst(appliedDirective2.getArgument("reason").argumentValue.value as Node) == '"Just because"'
         def directive2 = f2.getDirective("deprecated")
         printAst(directive2.getArgument("reason").argumentDefaultValue.value as Node) == '"No longer supported"'
@@ -2023,10 +2085,11 @@ class SchemaGeneratorTest extends Specification {
         directives = schema.getDirectives()
 
         then:
-        directives.size() == 8 // built in ones :  include / skip and deprecated
+        directives.size() == 10 // built in ones :  include / skip and deprecated
         def directiveNames = directives.collect { it.name }
         directiveNames.contains("include")
         directiveNames.contains("skip")
+        directiveNames.contains("defer")
         directiveNames.contains("deprecated")
         directiveNames.contains("specifiedBy")
         directiveNames.contains("oneOf")
@@ -2038,9 +2101,10 @@ class SchemaGeneratorTest extends Specification {
         directivesMap = schema.getDirectivesByName()
 
         then:
-        directivesMap.size() == 8 // built in ones
+        directivesMap.size() == 10 // built in ones
         directivesMap.containsKey("include")
         directivesMap.containsKey("skip")
+        directivesMap.containsKey("defer")
         directivesMap.containsKey("deprecated")
         directivesMap.containsKey("oneOf")
         directivesMap.containsKey("sd1")
@@ -2264,6 +2328,46 @@ class SchemaGeneratorTest extends Specification {
         schema = TestUtil.schema(sdl2)
         then:
         schema != null
+    }
+
+    def "#4201 indirect cyclical directive definitions are rejected without stack overflow - #name"() {
+        given:
+        def registry = new SchemaParser().parse(sdl)
+
+        when:
+        UnExecutableSchemaGenerator.makeUnExecutableSchema(registry)
+
+        then:
+        def e = thrown(SchemaProblem)
+        e.errors.size() == 1
+        e.errors.get(0) instanceof DirectiveIllegalReferenceError
+        e.errors.get(0).getMessage().contains(cycleMessage)
+
+        where:
+        name << ["two directives", "three directives"]
+        sdl << [
+                '''
+                    directive @foo(x: Int @bar(y: 1)) on FIELD_DEFINITION | ARGUMENT_DEFINITION
+                    directive @bar(y: Int @foo(x: 2)) on FIELD_DEFINITION | ARGUMENT_DEFINITION
+
+                    type Query {
+                        field: String @foo(x: 10) @bar(y: 20)
+                    }
+                ''',
+                '''
+                    directive @dirA(x: Int @dirB(y: 1)) on FIELD_DEFINITION | ARGUMENT_DEFINITION
+                    directive @dirB(y: Int @dirC(z: 2)) on FIELD_DEFINITION | ARGUMENT_DEFINITION
+                    directive @dirC(z: Int @dirA(x: 3)) on FIELD_DEFINITION | ARGUMENT_DEFINITION
+
+                    type Query {
+                        field: String @dirA(x: 10) @dirB(y: 20) @dirC(z: 30)
+                    }
+                '''
+        ]
+        cycleMessage << [
+                "'foo' must not reference itself via directive cycle 'foo -> bar -> foo'",
+                "'dirA' must not reference itself via directive cycle 'dirA -> dirB -> dirC -> dirA'"
+        ]
     }
 
     def "code registry default data fetcher is respected"() {
@@ -2521,7 +2625,7 @@ class SchemaGeneratorTest extends Specification {
             type Query {
                 f(arg : OneOfInputType) : String
             }
-            
+
             input OneOfInputType @oneOf {
                 a : String
                 b : String
@@ -2536,5 +2640,19 @@ class SchemaGeneratorTest extends Specification {
         GraphQLInputObjectType inputObjectType = schema.getTypeAs("OneOfInputType")
         inputObjectType.isOneOf()
         inputObjectType.hasAppliedDirective("oneOf")
+    }
+
+    def "should throw IllegalArgumentException when withValidation is false"() {
+        given:
+        def sdl = '''
+            type Query { hello: String }
+        '''
+        def options = SchemaGenerator.Options.defaultOptions().withValidation(false)
+
+        when:
+        new SchemaGenerator().makeExecutableSchema(options, new SchemaParser().parse(sdl), RuntimeWiring.MOCKED_WIRING)
+
+        then:
+        thrown(IllegalArgumentException)
     }
 }

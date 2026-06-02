@@ -11,7 +11,7 @@ import graphql.execution.instrumentation.parameters.InstrumentationCreateStatePa
 import graphql.execution.instrumentation.parameters.InstrumentationExecuteOperationParameters;
 import graphql.execution.instrumentation.parameters.InstrumentationValidationParameters;
 import graphql.validation.ValidationError;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NullMarked;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -26,9 +26,10 @@ import static graphql.execution.instrumentation.SimpleInstrumentationContext.noO
  * Prevents execution if the query complexity is greater than the specified maxComplexity.
  * <p>
  * Use the {@code Function<QueryComplexityInfo, Boolean>} parameter to supply a function to perform a custom action when the max complexity
- * is exceeded. If the function returns {@code true} a {@link AbortExecutionException} is thrown.
+ * is exceeded. If the function returns {@code true} an {@link AbortExecutionException} is thrown.
  */
 @PublicApi
+@NullMarked
 public class MaxQueryComplexityInstrumentation extends SimplePerformantInstrumentation {
 
     private final int maxComplexity;
@@ -74,17 +75,17 @@ public class MaxQueryComplexityInstrumentation extends SimplePerformantInstrumen
     public MaxQueryComplexityInstrumentation(int maxComplexity, FieldComplexityCalculator fieldComplexityCalculator,
                                              Function<QueryComplexityInfo, Boolean> maxQueryComplexityExceededFunction) {
         this.maxComplexity = maxComplexity;
-        this.fieldComplexityCalculator = assertNotNull(fieldComplexityCalculator, () -> "calculator can't be null");
+        this.fieldComplexityCalculator = assertNotNull(fieldComplexityCalculator, "calculator can't be null");
         this.maxQueryComplexityExceededFunction = maxQueryComplexityExceededFunction;
     }
 
     @Override
-    public @Nullable CompletableFuture<InstrumentationState> createStateAsync(InstrumentationCreateStateParameters parameters) {
+    public CompletableFuture<InstrumentationState> createStateAsync(InstrumentationCreateStateParameters parameters) {
         return CompletableFuture.completedFuture(new State());
     }
 
     @Override
-    public @Nullable InstrumentationContext<List<ValidationError>> beginValidation(InstrumentationValidationParameters parameters, InstrumentationState rawState) {
+    public InstrumentationContext<List<ValidationError>> beginValidation(InstrumentationValidationParameters parameters, InstrumentationState rawState) {
         State state = ofState(rawState);
         // for API backwards compatibility reasons we capture the validation parameters, so we can put them into QueryComplexityInfo
         state.instrumentationValidationParameters.set(parameters);
@@ -92,7 +93,7 @@ public class MaxQueryComplexityInstrumentation extends SimplePerformantInstrumen
     }
 
     @Override
-    public @Nullable InstrumentationContext<ExecutionResult> beginExecuteOperation(InstrumentationExecuteOperationParameters instrumentationExecuteOperationParameters, InstrumentationState rawState) {
+    public InstrumentationContext<ExecutionResult> beginExecuteOperation(InstrumentationExecuteOperationParameters instrumentationExecuteOperationParameters, InstrumentationState rawState) {
         State state = ofState(rawState);
         QueryComplexityCalculator queryComplexityCalculator = newQueryComplexityCalculator(instrumentationExecuteOperationParameters.getExecutionContext());
         int totalComplexity = queryComplexityCalculator.calculate();

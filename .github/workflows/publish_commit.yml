@@ -1,16 +1,21 @@
 name: Publish Commit SHA for performance testing
 on:
-  push:
+  pull_request_target:
+    types:
+      - closed
     branches:
       - master
+    paths-ignore:
+      - 'performance-results/**'
 permissions:
   id-token: write # This is required for requesting the JWT
   contents: read  # This is required for actions/checkout
 jobs:
   publishCommit:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::637423498965:role/GitHubActionGrahQLJava
           aws-region: "ap-southeast-2"
